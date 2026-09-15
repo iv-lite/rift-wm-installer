@@ -32,7 +32,7 @@ The installer runs these steps from `scripts/`:
 | `install-deps` | Install Homebrew if missing, tccutil-rs |
 | `configure-system` | Enable "Displays have separate Spaces"; show the native menu bar (Rift draws its indicators in it) |
 | `install-ghostty` | Install Ghostty + write `~/.config/ghostty/config` (frameless title bar) |
-| `install-rift` | Install Rift (`acsandmann/tap`) + write `~/.config/rift/config.toml` + install its launchd service |
+| `install-rift` | Install Rift (`acsandmann/tap`) + write `~/.config/rift/config.toml` + install the `cycle-column-width` helper + install its launchd service |
 | `install-borders` | Install JankyBorders + write `~/.config/borders/bordersrc` |
 | `install-helpers` | Install the shortcut cheat-sheet helpers into `~/.config/mac-scrolling-wm/helpers/` and install the macOS cheat-sheet viewer app (fetches a pre-built release from GitHub at `iv-lite/mac-cheatsheet-viewer`, falls back to a local source build) |
 | `grant-permissions` | Grant Accessibility via tccutil-rs (user → sudo → manual fallback) |
@@ -70,9 +70,9 @@ Rift modifiers: **Cmd+Option** (window focus/state/columns), **Cmd+Ctrl**
 | `Cmd` + `Option` + Arrows | Move focus between windows |
 | `Cmd` + `Option` + `Shift` + Arrows | Move window (swap) |
 | 3-finger swipe (← / →) | Switch columns |
-| `Cmd` + `Option` + `W` | Grow the focused column |
-| `Cmd` + `Option` + `Shift` + `W` | Shrink the focused column |
-| `Cmd` + `Option` + `M` | Fullscreen within gaps (closest Rift equivalent to Paneru's "jump to full width") |
+| `Cmd` + `Option` + `W` | Cycle the focused column width forward through 0.3 / 0.5 / 1.0 |
+| `Cmd` + `Option` + `Shift` + `W` | Cycle the focused column width backward through the same presets |
+| `Cmd` + `Option` + `M` | Jump the focused column straight to full width (stays tiled) |
 | `Cmd` + `Option` + `Space` | Center the focused column |
 
 ### Workspaces (1-9, fixed)
@@ -97,6 +97,7 @@ Rift modifiers: **Cmd+Option** (window focus/state/columns), **Cmd+Ctrl**
 |---|---|
 | `Cmd` + `Ctrl` + Arrows | Focus a display in that direction (window stays put) |
 | `Cmd` + `Ctrl` + `Shift` + Arrows | Move the focused window to a display in that direction (follows) |
+| `Cmd` + `Ctrl` + `Option` + Arrows | Warp only the mouse pointer to a display in that direction (no focus/window change) |
 
 > **No helper binaries needed.** Rift has native directional display
 > commands (`focus_display` / `move_window_to_display` in `[keys]`), unlike
@@ -166,12 +167,26 @@ Installed helpers live in `~/.config/mac-scrolling-wm/helpers/` (copied on
 
 - Rift gives each display its own independent tiling layout and workspace
   set (with "Displays have separate Spaces" on).
-- The scrolling strip works best when displays are arranged **vertically**
-  in System Settings → Displays, even if they sit physically side-by-side —
-  side-by-side arrangement in System Settings can cause windows to leak
-  between strips.
-- Display focus/move direction (`Cmd+Ctrl` lane) is resolved from Rift's own
-  view of display geometry — no manual offset/inversion setting needed.
+- The scrolling strip **requires** displays arranged **vertically** in
+  System Settings → Displays, even if they sit physically side-by-side —
+  Rift's own docs note that side-by-side arrangement lets off-screen columns
+  leak onto the other display (macOS puts all display coordinates in one
+  shared space).
+- Direction selectors (`left`/`right`/`up`/`down`) for every display command
+  (`focus_display`, `move_window_to_display`, `move_mouse_to_display`) are
+  resolved against **that macOS arrangement**, not physical desk placement —
+  no manual offset/inversion setting needed, but it does mean that if your
+  monitors are physically side-by-side and arranged vertically per the
+  requirement above, the *up/down* keys are what actually move left/right in
+  real life.
+- **Physically moving the mouse to a screen edge only crosses to the next
+  monitor if that edge matches the System Settings arrangement.** This is
+  native macOS behavior, not something Rift controls — with vertical
+  arrangement, only the top/bottom edges auto-cross, and there's no setting
+  (unlike Paneru's old `horizontal_mouse_warp`) to fake a right-edge crossing
+  while arranged vertically. Use the `Cmd+Ctrl+Option+Arrows` hotkey (warps
+  just the pointer) or `Cmd+Ctrl+Arrows` (focuses the display) instead of
+  relying on physical mouse movement for left/right navigation.
 - Per-display gap overrides are supported in the config (commented template
   in `[settings.layout.gaps.per_display]`). Get display UUIDs with
   `rift-cli query displays`.
@@ -290,7 +305,10 @@ VM is named `rift-test`.
 ```
 install                   Main installer (runs scripts/*)
 uninstall                 Full uninstaller with interactive keep menu
-scripts/                  Per-component install/system/accessibility steps
+scripts/                  Per-component install/system/accessibility steps,
+                          plus cycle-column-width (deployed to
+                          ~/.config/rift/, bound from config.toml's
+                          Cmd+Option+W/Shift+W/M)
 config/rift/              Rift config (scrolling strip, bindings, gaps, menu bar) — config.toml
 config/borders/           JankyBorders focus-border config — bordersrc
 config/ghostty/           Ghostty config (frameless title bar)

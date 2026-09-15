@@ -52,10 +52,21 @@ cp "$REPO_ROOT/config/rift/config.toml" ~/.config/rift/config.toml
 ok "Rift config installed to ~/.config/rift/config.toml"
 
 # ─────────────────────────────────────────────────────────────
+# Column-width cycling helper (bound from config.toml's Cmd+Option+W/M)
+# ─────────────────────────────────────────────────────────────
+cp "$REPO_ROOT/scripts/cycle-column-width" ~/.config/rift/cycle-column-width
+chmod +x ~/.config/rift/cycle-column-width
+ok "cycle-column-width installed to ~/.config/rift/cycle-column-width"
+
+# ─────────────────────────────────────────────────────────────
 # launchd service (applies Accessibility before start)
 # ─────────────────────────────────────────────────────────────
 note "Installing Rift launchd service..."
-rift service install
-ok "Rift service installed"
+if [ -f "$HOME/Library/LaunchAgents/git.acsandmann.rift.plist" ]; then
+	ok "Rift launchd service already installed (reinstall refreshes the plist)"
+else
+	rift service install
+	ok "Rift service installed"
+fi
 
 warn "Rift will be started by enable-services after permissions are granted."

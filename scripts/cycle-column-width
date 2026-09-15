@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Cycle the focused column's width through 0.3 / 0.5 / 1.0 (Rift scrolling layout).
+#
+# Reads the focused column's current width ratio, picks the next step, then asks
+# rift to resize by the exact delta. Rift clamps widths to [min,max], so steps at
+# a boundary (0.3 and 1.0) always land exactly; the middle step (0.5) is exact
+# because resize-by moves by the exact delta measured back to the target.
+#
+# Tries `rift-cli query layout` first for the engine's own ratio (exact), and
+# falls back to measuring the focused window's frame against its display.
+#
+# Usage: cycle-column-width [next|prev|max]
+#   next (default) - grow to the nearest larger preset, wrapping past 1.0 to 0.3
+#   prev            - shrink to the nearest smaller preset, wrapping past 0.3 to 1.0
+#   max             - jump straight to 1.0 (full width, stays tiled — unlike
+#                     toggle_fullscreen[_within_gaps], this never floats the window)
+
+MODE="${1:-next}"
+
+RIFT_CLI="$(command -v rift-cli 2>/dev/null || true)"
+if [ -z "$RIFT_CLI" ] || [ ! -x "$RIFT_CLI" ]; then
+	exit 0
+fi
+
+layout_json="$(command "$RIFT_CLI" query layout 2>/dev/null || true)"
+windows_json="$(command "$RIFT_CLI" query windows 2>/dev/null || true)"
+displays_json="$(command "$RIFT_CLI" query displays 2>/dev/null || true)"
+config_json="$(command "$RIFT_CLI" execute config get 2>/dev/null || true)"
+
+delta="$(LAYOUT_JSON="$layout_json" WINDOWS_JSON="$windows_json" \
+	DISPLAYS_JSON="$displays_json" CONFIG_JSON="$config_json" MODE="$MODE" \
+	python3 - <<'PY'
+import json
+import os
+import sys
+
+TARGETS = [0.3, 0.5, 1.0]
+EPS = 1e-6
+SNAP = 0.02
+
+
+def load(s):
+    if not s:
+        return None
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        return None
+
+
+def ratio_from_layout():
+    """Engine-exact focused-column ratio from `query layout` container weights."""
+    data = load(os.environ.get("LAYOUT_JSON"))
+    if not isinstance(data, dict):
+        return None
+    tree = data.get("container_tree")
+    if not tree:
+        return None
+
+    def find_selected(node):
+        if node.get("is_selected"):
+            return node
+        for child in node.get("children") or []:
+            found = find_selected(child)
+            if found:
+                return found
+        return None
+
+    def find_parent(node, target):
+        for child in node.get("children") or []:
+            if child is target:
+                return node
+            found = find_parent(child, target)
+            if found:
+                return found
+        return None
+
+    selected = find_selected(tree)
+    if selected is None:
+        return None
+    column = find_parent(tree, selected) or selected
+    weight = column.get("weight")
+    return weight if isinstance(weight, (int, float)) else None
+
+
+def ratio_from_frames():
+    """Geometric estimate from focused window + display + inner gap."""
+    windows = load(os.environ.get("WINDOWS_JSON"))
+    if not isinstance(windows, list):
+        return None
+    focused = next((w for w in windows if w.get("is_focused")), None)
+    if not focused or focused.get("is_floating"):
+        return None
+    frame = focused.get("frame") or {}
+    win_x = (frame.get("origin") or {}).get("x")
+    win_w = (frame.get("size") or {}).get("width")
+    if not isinstance(win_x, (int, float)) or not isinstance(win_w, (int, float)):
+        return None
+
+    displays = load(os.environ.get("DISPLAYS_JSON"))
+    if not isinstance(displays, list):
+        return None
+    center_x = win_x + win_w / 2.0
+    viewport_w = None
+    for display in displays:
+        disp_frame = display.get("frame") or {}
+        origin = disp_frame.get("origin") or {}
+        size = disp_frame.get("size") or {}
+        d_x, d_w = origin.get("x"), size.get("width")
+        if (
+            isinstance(d_x, (int, float))
+            and isinstance(d_w, (int, float))
+            and d_x <= center_x < d_x + d_w
+        ):
+            viewport_w = d_w
+            break
+    if viewport_w is None:
+        return None
+
+    gap = 12.0
+    config = load(os.environ.get("CONFIG_JSON"))
+    if isinstance(config, dict):
+        inner = (
+            config.get("settings", {})
+            .get("layout", {})
+            .get("gaps", {})
+            .get("inner", {})
+            .get("horizontal")
+        )
+        if isinstance(inner, (int, float)):
+            gap = float(inner)
+
+    return (win_w + gap) / (viewport_w + gap)
+
+
+ratio = ratio_from_layout()
+if ratio is None:
+    ratio = ratio_from_frames()
+if ratio is None:
+    sys.exit(0)
+
+for target in TARGETS:
+    if abs(ratio - target) < SNAP:
+        ratio = target
+        break
+
+mode = os.environ.get("MODE", "next")
+if mode == "max":
+    next_target = TARGETS[-1]
+elif mode == "prev":
+    next_target = next((t for t in reversed(TARGETS) if t < ratio - EPS), TARGETS[-1])
+else:
+    next_target = next((t for t in TARGETS if t > ratio + EPS), TARGETS[0])
+
+print(f"{(next_target - ratio):.4f}")
+PY
+)"
+
+case "$delta" in
+	''|*[!0-9.+-]*|*nan*|*inf*) exit 0 ;;
+esac
+
+command "$RIFT_CLI" execute window resize-by -- "$delta"

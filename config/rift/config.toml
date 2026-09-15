@@ -42,7 +42,7 @@ mode = "scrolling"
 window_insertion_point = "end_of_tree"
 
 [settings.layout.scrolling]
-column_width_ratio = 0.5
+column_width_ratio = 1.0
 min_column_width_ratio = 0.3
 max_column_width_ratio = 1.0
 alignment = "center"
@@ -131,6 +131,7 @@ main       = "Meta + Alt"           # Cmd+Option: window focus/state/columns
 mainShift  = "Meta + Alt + Shift"   # Cmd+Option+Shift: move window
 disp       = "Meta + Ctrl"          # Cmd+Ctrl: displays
 dispShift  = "Meta + Ctrl + Shift"  # Cmd+Ctrl+Shift: move window to display
+mouseDisp  = "Meta + Ctrl + Alt"    # Cmd+Ctrl+Option: warp mouse to display only
 ws         = "Ctrl + Alt"           # Ctrl+Option: workspaces
 wsShift    = "Ctrl + Alt + Shift"   # Ctrl+Option+Shift: move window to workspace
 
@@ -147,12 +148,20 @@ wsShift    = "Ctrl + Alt + Shift"   # Ctrl+Option+Shift: move window to workspac
 "mainShift + Up"    = { move_node = "up" }
 "mainShift + Down"  = { move_node = "down" }
 
-# ─── Column width (Cmd+Option+W) ───
-"main + W"      = { resize_window_grow = "smart" }
-"mainShift + W" = { resize_window_shrink = "smart" }
-# Paneru's dedicated "jump to full width" (Cmd+Option+M) has no equivalent
-# preset-jump action in Rift; approximated with fullscreen-within-gaps.
-"main + M" = "toggle_fullscreen_within_gaps"
+# ─── Column width (Cmd+Option+W) — matches Paneru's preset_column_widths ───
+# Neither `resize_window_grow`/`resize_window_shrink` (named mode only, no
+# numeric amount) nor a plain `resize-by <fixed amount>` land on Paneru's
+# 0.3/0.5/1.0 presets (they're unevenly spaced). `cycle-column-width`
+# (recovered from this repo's pre-Paneru history, scripts/cycle-column-width)
+# measures the focused column's exact current width via `rift-cli query
+# layout` and resizes by the precise delta to the next/previous preset.
+"main + W"      = { exec = ["/bin/bash", "-c", "$HOME/.config/rift/cycle-column-width next"] }
+"mainShift + W" = { exec = ["/bin/bash", "-c", "$HOME/.config/rift/cycle-column-width prev"] }
+# Paneru's dedicated "jump to full width" (Cmd+Option+M), staying tiled.
+# `toggle_fullscreen`/`toggle_fullscreen_within_gaps` also float the window
+# (undocumented side effect) — this reuses the same resize-by mechanism as
+# W/Shift+W instead, which never touches floating state.
+"main + M" = { exec = ["/bin/bash", "-c", "$HOME/.config/rift/cycle-column-width max"] }
 
 # ─── Workspaces (Ctrl+Option+Up/Down) ───
 # Rift workspaces are fixed/numbered, not dynamic rows, so this cycles
@@ -194,6 +203,16 @@ wsShift    = "Ctrl + Alt + Shift"   # Ctrl+Option+Shift: move window to workspac
 "dispShift + Right" = { move_window_to_display = { selector = "right" } }
 "dispShift + Up"    = { move_window_to_display = { selector = "up" } }
 "dispShift + Down"  = { move_window_to_display = { selector = "down" } }
+
+# Warp only the mouse pointer to a display, without changing window focus —
+# Rift has no automatic edge-crossing warp (unlike Paneru's
+# `horizontal_mouse_warp`), so this hotkey is the explicit substitute.
+# Direction is resolved against the macOS arrangement (see README), not
+# physical monitor placement.
+"mouseDisp + Left"  = { move_mouse_to_display = "left" }
+"mouseDisp + Right" = { move_mouse_to_display = "right" }
+"mouseDisp + Up"    = { move_mouse_to_display = "up" }
+"mouseDisp + Down"  = { move_mouse_to_display = "down" }
 
 # ─── Window state ───
 "main + V" = "toggle_window_floating"

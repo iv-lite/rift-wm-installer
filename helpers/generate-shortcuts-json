@@ -49,6 +49,9 @@ EXEC_LABELS = {
     "open -a ghostty": ("Apps", "Open Ghostty"),
     "rift-cli execute workspace next": ("Workspaces", "Next workspace"),
     "rift-cli execute workspace prev": ("Workspaces", "Previous workspace"),
+    "$home/.config/rift/cycle-column-width next": ("Column width", "Cycle column width forward (0.3/0.5/1.0)"),
+    "$home/.config/rift/cycle-column-width prev": ("Column width", "Cycle column width backward (0.3/0.5/1.0)"),
+    "$home/.config/rift/cycle-column-width max": ("Column width", "Jump to full width (stays tiled)"),
 }
 
 # Curated (category, label) for known native actions. Unknown actions fall
@@ -70,6 +73,7 @@ DIRECTION_ACTION_LABELS = {
     "move_focus": ("Focus", "Focus window {dir}"),
     "move_node": ("Move", "Move window {dir}"),
     "focus_display": ("Displays", "Focus display {dir}"),
+    "move_mouse_to_display": ("Displays", "Warp mouse to display {dir}"),
 }
 
 WORKSPACE_ACTION_LABELS = {
