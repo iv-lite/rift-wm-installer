@@ -24,8 +24,12 @@ VIEWER_REPO="${MAC_WM_VIEWER_REPO:-iv-lite/mac-cheatsheet-viewer}"
 mkdir -p "$HELPERS_DIR"
 cp "$REPO_ROOT/helpers/generate-shortcuts-json" "$HELPERS_DIR/generate-shortcuts-json"
 cp "$REPO_ROOT/helpers/display-shortcuts" "$HELPERS_DIR/display-shortcuts"
-chmod +x "$HELPERS_DIR/generate-shortcuts-json" "$HELPERS_DIR/display-shortcuts"
-ok "Helpers installed to $HELPERS_DIR (generate-shortcuts-json, display-shortcuts)"
+cp "$REPO_ROOT/helpers/move-display" "$HELPERS_DIR/move-display"
+cp "$REPO_ROOT/helpers/display-geometry" "$HELPERS_DIR/display-geometry"
+cp "$REPO_ROOT/helpers/warp-pointer" "$HELPERS_DIR/warp-pointer"
+chmod +x "$HELPERS_DIR/generate-shortcuts-json" "$HELPERS_DIR/display-shortcuts" \
+  "$HELPERS_DIR/move-display" "$HELPERS_DIR/display-geometry" "$HELPERS_DIR/warp-pointer"
+ok "Helpers installed to $HELPERS_DIR (generate-shortcuts-json, display-shortcuts, move-display, display-geometry, warp-pointer)"
 
 # ─────────────────────────────────────────────────────────────
 # mac-cheatsheet-viewer app (fetched on every run, overwrites the bundle)
