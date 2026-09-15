@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+CYAN=$'\033[0;36m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+RESET=$'\033[0m'
+
+note() { echo "  ${CYAN}→ $*${RESET}"; }
+ok()   { echo "  ${GREEN}✓ $*${RESET}"; }
+warn() { echo "  ${YELLOW}⚠ $*${RESET}"; }
+
+# ─────────────────────────────────────────────────────────────
+# Install JankyBorders (Rift has no built-in window-border setting)
+# ─────────────────────────────────────────────────────────────
+if command -v borders >/dev/null 2>&1; then
+	note "JankyBorders already installed — upgrading..."
+	brew trust FelixKratz/formulae 2>/dev/null || true
+	brew tap FelixKratz/formulae
+	brew upgrade borders 2>/dev/null || warn "JankyBorders upgrade failed (network?) — keeping installed version"
+	ok "JankyBorders up to date"
+else
+	note "Installing JankyBorders via Homebrew..."
+	brew trust FelixKratz/formulae 2>/dev/null || true
+	brew tap FelixKratz/formulae
+	brew install borders
+	ok "JankyBorders installed"
+fi
+
+# ─────────────────────────────────────────────────────────────
+# Config: ~/.config/borders/bordersrc (executed on launch)
+# ─────────────────────────────────────────────────────────────
+mkdir -p ~/.config/borders
+
+if [ -f ~/.config/borders/bordersrc ]; then
+	note "Existing bordersrc found — backing up"
+	cp ~/.config/borders/bordersrc ~/.config/borders/bordersrc.bak
+fi
+
+cp "$REPO_ROOT/config/borders/bordersrc" ~/.config/borders/bordersrc
+chmod +x ~/.config/borders/bordersrc
+ok "JankyBorders config installed (~/.config/borders/bordersrc)"
+
+warn "Do not run 'brew services start borders' yet — enable-services will do it."
