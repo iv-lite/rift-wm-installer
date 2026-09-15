@@ -24,12 +24,27 @@ VIEWER_REPO="${MAC_WM_VIEWER_REPO:-iv-lite/mac-cheatsheet-viewer}"
 mkdir -p "$HELPERS_DIR"
 cp "$REPO_ROOT/helpers/generate-shortcuts-json" "$HELPERS_DIR/generate-shortcuts-json"
 cp "$REPO_ROOT/helpers/display-shortcuts" "$HELPERS_DIR/display-shortcuts"
-cp "$REPO_ROOT/helpers/move-display" "$HELPERS_DIR/move-display"
 cp "$REPO_ROOT/helpers/display-geometry" "$HELPERS_DIR/display-geometry"
+cp "$REPO_ROOT/helpers/mouse-display" "$HELPERS_DIR/mouse-display"
 cp "$REPO_ROOT/helpers/warp-pointer" "$HELPERS_DIR/warp-pointer"
 chmod +x "$HELPERS_DIR/generate-shortcuts-json" "$HELPERS_DIR/display-shortcuts" \
-  "$HELPERS_DIR/move-display" "$HELPERS_DIR/display-geometry" "$HELPERS_DIR/warp-pointer"
-ok "Helpers installed to $HELPERS_DIR (generate-shortcuts-json, display-shortcuts, move-display, display-geometry, warp-pointer)"
+  "$HELPERS_DIR/display-geometry" "$HELPERS_DIR/mouse-display" "$HELPERS_DIR/warp-pointer"
+ok "Helpers installed to $HELPERS_DIR (generate-shortcuts-json, display-shortcuts, display-geometry, mouse-display, warp-pointer)"
+
+# move-display needs the Accessibility API (AXUIElement), which requires a
+# one-time permission grant tied to a specific binary's path/identity. An
+# ephemeral `swift -e` process (like the three CG helpers above, which need
+# no permission at all) gets a fresh identity on every run and could never
+# hold that grant, so this one is compiled once here into a stable binary.
+if command -v swiftc >/dev/null 2>&1; then
+  note "Compiling move-display (Accessibility helper)..."
+  swiftc -O "$REPO_ROOT/helpers/move-display.swift" -o "$HELPERS_DIR/move-display"
+  chmod +x "$HELPERS_DIR/move-display"
+  ok "move-display compiled to $HELPERS_DIR/move-display"
+else
+  warn "swiftc not found — skipping move-display (moving windows across 3+ displays will not work)"
+  warn "Install the Xcode Command Line Tools (xcode-select --install) and re-run to enable it."
+fi
 
 # ─────────────────────────────────────────────────────────────
 # mac-cheatsheet-viewer app (fetched on every run, overwrites the bundle)

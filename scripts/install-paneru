@@ -53,7 +53,7 @@ esac
 # ─────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────
-mkdir -p ~/.config/paneru
+mkdir -p ~/.config/paneru/lib
 
 if [ -f ~/.config/paneru/init.lua ]; then
 	note "Existing config found at ~/.config/paneru/init.lua — backing up"
@@ -61,7 +61,11 @@ if [ -f ~/.config/paneru/init.lua ]; then
 fi
 
 cp "$REPO_ROOT/config/paneru/init.lua" ~/.config/paneru/init.lua
-ok "Paneru config installed to ~/.config/paneru/init.lua"
+# init.lua requires lib/*.lua (log.lua, query.lua, displays.lua) — no
+# per-file backup needed, these are overwritten fresh each run same as
+# helpers/ scripts.
+cp "$REPO_ROOT"/config/paneru/lib/*.lua ~/.config/paneru/lib/
+ok "Paneru config installed to ~/.config/paneru/init.lua (+ lib/*.lua)"
 note "Menu-bar workspace indicator is off (upstream event-tap starvation bug, karinushka/paneru#390);"
 note "the popup still shows the active workspace. Re-enable after a Paneru release ships the fix."
 note "Cmd+Shift+? opens the shortcut cheat sheet via the helper above."

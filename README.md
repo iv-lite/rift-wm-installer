@@ -101,48 +101,71 @@ window in the same lane), **Ctrl**.
 | `Cmd` + `Option` + `↑`/`↓` | Focus a column above/below — crosses displays when no window is there |
 | `Cmd` + `Option` + `Shift` + `↑`/`↓` | Move a window to the display above/below (when no window is there to swap with) |
 
-> **Previous display is synthesized:** Paneru has no previous-direction
-> display command (verified in Paneru's `argv` parser and
-> `QUERY_AND_SUBSCRIBE_FORMAT.md`), so the focus-only shortcuts use a
-> geometry-based Lua helper that orders displays by their macOS arrangement
-> position (`y` then `x`) and picks the previous/next display via
-> `ws:focus` — no window is moved.
+Display navigation lives in `config/paneru/lib/` (`displays.lua`, backed by
+`query.lua` and `log.lua`), `require`d from `init.lua` — not inline there —
+so the config stays a short list of bindings while the logic reads as one
+module. See the comment block at the top of `lib/displays.lua` for the full
+design; summary below.
+
+> **Previous display is synthesized.** Paneru has no previous-direction
+> display command (verified directly in its source: `to_next_display`/
+> `mouse_to_next_display` in `src/commands.rs`, and the Lua bindings in
+> `crates/lua/src/lib.rs`, expose `next_display` only — confirmed against
+> the complete `Command`/`Operation`/`MouseMove` vocabulary and CLI argv
+> grammar too: there is no indexed or directional variant anywhere in the
+> protocol), so `lib/displays.lua` orders every online display — including
+> ones with no windows on them — by its macOS arrangement position (`y`
+> then `x`) and steps ±1 through that list, focusing the target display's
+> existing window via `ws:focus`. No window is moved.
+>
+> **"Current display" follows the mouse pointer**
+> (`helpers/mouse-display`), not the focused window: a window is only
+> tracked by Paneru's Lua `display_of` via strip membership, which doesn't
+> exist when the display you're on has no windows at all — that would
+> otherwise make focus-switching impossible to trigger *from* an empty
+> display. The mouse pointer always has a position regardless of whether any
+> window is there, so it works the same whether the current or target
+> display is empty.
 >
 > **Moving to any display needs a helper on 3+ monitors.** Paneru's engine
 > can only move a window to a single fixed display (`other().next()`, the
 > first spawned display that isn't the active one), which cannot reach
 > every monitor on a three-or-more display setup — pressing the move
 > shortcut just hops between two of them. With exactly two displays that
-> one hop is correct (previous and next are the same display), so the
-> move shortcuts keep using `window nextdisplay` there. With three or more
-> they delegate to `~/.config/mac-scrolling-wm/helpers/move-display`:
-> the script floats the focused window, teleports it onto the target
-> display's frame via Accessibility (keeping its current size — the move
-> does **not** resize the window in transit), clicks it so macOS switches
-> its active display (Paneru's active-display marker rotates along), and
-> re-manages it so it is adopted by the target display's strip. Only once
-> it is adopted does the move maximize the window to full width on that
-> display. It then **verifies the adoption** (`paneru query state`),
-> polling the active display instead of sleeping so the OS's lagging
-> display-change notification can't bounce the window back onto the source
-> monitor. While a move is mid-flight the focused window is floating, and
-> both the move and the focus shortcuts skip re-presses so targets are
-> never computed off a stale "current" display.
+> one hop is correct (previous and next are the same display), so the move
+> shortcuts keep using `window nextdisplay` there. With three or more they
+> delegate to `~/.config/mac-scrolling-wm/helpers/move-display`: a compiled
+> Swift binary that uses the Accessibility API (`AXUIElement`) directly —
+> not AppleScript/System Events — to reposition the focused window onto the
+> target display's frame (keeping its current size — the move does **not**
+> resize the window in transit), then warps the pointer and synthesizes a
+> click at the window's new center so macOS switches its active display
+> (Paneru's active-display marker rotates along), and re-manages it so it
+> is adopted by the target display's strip. Only once it is adopted does
+> the move maximize the window to full width on that display. It then
+> **verifies the adoption** (`paneru query state`), polling in-process
+> instead of sleeping so the OS's lagging display-change notification can't
+> bounce the window back onto the source monitor. While a move is
+> mid-flight the focused window is floating, and both the move and the
+> focus shortcuts skip re-presses so targets are never computed off a stale
+> "current" display.
 >
 > **Empty displays are reachable.** Paneru's Lua `display_of` resolves a
 > window's display by *membership* in a strip, so a monitor with no windows
 > used to be invisible and could not be focused or moved onto. The display
-> geometry now comes from a helper (`helpers/display-geometry`) that lists
-> every online display via CoreGraphics — empty ones included — and is cached
-> in Lua, re-read on display events and whenever a window appears on an
-> unknown display. Move targets an occupied *or* empty display (the helper
-> teleports the window onto the blank monitor's frame and it is adopted by
-> that strip). Focus on an empty display drops the pointer on its center
-> (via `helpers/warp-pointer`), the same idea as Paneru's native
+> geometry comes from a helper (`helpers/display-geometry`) that lists
+> every online display via CoreGraphics — empty ones included — and is
+> cached in Lua, re-read on display events and whenever a window appears on
+> an unknown display. Move targets an occupied *or* empty display (the
+> helper teleports the window onto the blank monitor's frame and it is
+> adopted by that strip). Focus on an empty display drops the pointer on
+> its center (via `helpers/warp-pointer`), the same idea as Paneru's native
 > `mouse nextdisplay`, so the OS and the next move target it.
 >
-> One-time cost: grant Accessibility access to System Events (macOS
-> prompts on first teleport).
+> One-time cost: grant Accessibility access to the compiled
+> `~/.config/mac-scrolling-wm/helpers/move-display` binary (macOS prompts
+> on first teleport). Since it's compiled once by `scripts/install-helpers`
+> (not run as an ephemeral script), that grant sticks across reinstalls.
 
 ### Window state
 
@@ -174,12 +197,6 @@ borderless always-on-top overlay (Esc / Cmd+W to close). The pieces:
   `~/.config/paneru/cheatsheet.json` (curated action labels; unknown bindings
   fall back to their command name).
 - `helpers/display-shortcuts` — runs the generator and opens the viewer.
-- `helpers/move-display` — the 3+ display window mover (see "Displays
-  (multi-monitor)"): floats the focused window, teleports it onto the target
-  display via Accessibility, clicks it to rotate Paneru's active-display
-  marker, and re-manages it, polling `paneru query state` to verify it was
-  adopted by the target strip. Needs one-time Accessibility access for System
-  Events; logs to `move-display.log` next to itself.
 - `mac-cheatsheet-viewer` — a separate repo (`iv-lite/mac-cheatsheet-viewer`)
   holding the Tauri app (static vanilla frontend, no npm) whose CLI arg is the
   JSON path; it validates strictly (`cheatsheet-core` crate) and renders
@@ -375,10 +392,15 @@ install                   Main installer (runs scripts/*)
 uninstall                 Full uninstaller with interactive keep menu
 scripts/                  Per-component install/system/accessibility steps
 config/paneru/            Paneru config (sliding strip, bindings, rules) — init.lua
+config/paneru/lib/        Display-navigation Lua modules, required by init.lua
+                          (displays.lua, query.lua, log.lua)
 config/ghostty/           Ghostty config (frameless title bar)
-helpers/                  shortcut cheat-sheet: generate-shortcuts-json,
-                          display-shortcuts (mac-cheatsheet-viewer app lives in
-                          its own repo at iv-lite/mac-cheatsheet-viewer)
+helpers/                  display navigation: display-geometry, mouse-display,
+                          warp-pointer (CoreGraphics), move-display.swift
+                          (Accessibility, compiled at install time); shortcut
+                          cheat-sheet: generate-shortcuts-json, display-shortcuts
+                          (mac-cheatsheet-viewer app lives in its own repo at
+                          iv-lite/mac-cheatsheet-viewer)
 tests/                    VM test workflow (tests/preview + lib/ backends)
 ```
 
