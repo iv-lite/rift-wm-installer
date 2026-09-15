@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""generate-shortcuts-json — read the Paneru init.lua BINDINGS table and emit
-the shortcut cheat-sheet JSON consumed by mac-cheatsheet-viewer.
+"""generate-shortcuts-json — read Rift's `[keys]` table from config.toml and
+emit the shortcut cheat-sheet JSON consumed by mac-cheatsheet-viewer.
 
 The JSON goes to stdout by default; display-shortcuts writes it to
-~/.config/paneru/cheatsheet.json and lets the viewer open it.
+~/.config/rift/cheatsheet.json and lets the viewer open it.
 
-Python 3.9+ (no tomllib).
+Rift's config is TOML, but this parses the `[keys]` table with regexes
+rather than a full TOML parser (Python 3.9+, no tomllib) — every binding in
+config/rift/config.toml is a single-line `"chord" = value` entry, which is
+all this needs to handle.
 """
 import argparse
 import json
@@ -16,133 +19,190 @@ import sys
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 CONFIG_CANDIDATES = [
-    os.path.join(os.environ.get("HOME", ""), ".config", "paneru", "init.lua"),
-    os.path.join(REPO_ROOT, "config", "paneru", "init.lua"),
+    os.path.join(os.environ.get("HOME", ""), ".config", "rift", "config.toml"),
+    os.path.join(REPO_ROOT, "config", "rift", "config.toml"),
 ]
 
-BINDING_RE = re.compile(r'^\s*\["([a-z0-9_ ]+)"\]\s*=\s*"((?:[^"\\]|\\.)*)"\s*,?\s*(?:--.*)?$')
-
-# paneru.bind("chord", function(ws) ... end) — function-bound shortcuts.
-LUA_BIND_RE = re.compile(r'^\s*paneru\.bind\("((?:[^"\\]|\\.)*)"\s*,\s*(?:function\b|[\w_]+)')
-
-# Ordered curated map: command string -> (category, action label).
-# Unknown commands fall back to "Other" with a title-cased action.
-CURATED = {
-    "window focus west": ("Focus", "Focus window west"),
-    "window focus east": ("Focus", "Focus window east"),
-    "window focus north": ("Focus", "Focus window north"),
-    "window focus south": ("Focus", "Focus window south"),
-    "window swap west": ("Move", "Move window west"),
-    "window swap east": ("Move", "Move window east"),
-    "window swap north": ("Move", "Move window north"),
-    "window swap south": ("Move", "Move window south"),
-    "window resize": ("Column width", "Cycle column width"),
-    "window shrink": ("Column width", "Shrink column to next preset"),
-    "window fullwidth": ("Column width", "Full-width page"),
-    "window virtual north": ("Workspaces", "Previous workspace row"),
-    "window virtual south": ("Workspaces", "Next workspace row"),
-    "window virtualmove north": ("Workspaces", "Move window, follow to previous row"),
-    "window virtualmove south": ("Workspaces", "Move window, follow to next row"),
-    "window focus managed": ("Workspaces", "Cycle managed windows"),
-    "cmd + ctrl - leftarrow": ("Displays", "Focus previous display"),
-    "cmd + ctrl - rightarrow": ("Displays", "Focus next display"),
-    "cmd + ctrl + shift - leftarrow": ("Displays", "Move window to previous display"),
-    "cmd + ctrl + shift - rightarrow": ("Displays", "Move window to next display"),
-    "cmd + shift - slash": ("Cheat sheet", "Show this cheat sheet"),
-    "mouse nextdisplay": ("Displays", "Warp mouse to next display"),
-    "window manage": ("Window state", "Toggle tiled / floating"),
-    "window stack": ("Window state", "Stack into neighbour column"),
-    "window unstack": ("Window state", "Pull out of a stack"),
-    "window center": ("Window state", "Center window"),
-    "window snap": ("Window state", "Snap window into view"),
-    "window equalize": ("Window state", "Equalize columns"),
-    "window balance": ("Window state", "Balance columns to focused width"),
-    "window copyrule": ("Window state", "Copy window rule"),
-    "restart": ("Misc", "Restart Paneru"),
-    "quit": ("Misc", "Quit Paneru"),
-}
+SECTION_RE = re.compile(r'^\s*\[([^\]]+)\]\s*$')
+# "chord" = <value>   — value runs to end of line (a trailing `# comment` is
+# stripped separately since TOML strings here never contain a literal '#').
+KEY_LINE_RE = re.compile(r'^\s*"((?:[^"\\]|\\.)+)"\s*=\s*(.+?)\s*$')
+ALIAS_RE = re.compile(r'^\s*(\w+)\s*=\s*"([^"]+)"\s*(?:#.*)?$')
+INLINE_FIELD_RE = re.compile(r'(\w+)\s*=\s*("(?:[^"\\]|\\.)*"|\{[^}]*\}|\[[^\]]*\]|-?\d+)')
 
 MODS = {
-    "cmd": "Cmd",
-    "ctrl": "Ctrl",
-    "alt": "Option",
-    "option": "Option",
+    "cmd": "Cmd", "meta": "Cmd",
+    "ctrl": "Ctrl", "control": "Ctrl",
+    "alt": "Option", "option": "Option",
     "shift": "Shift",
 }
 
 KEYS = {
-    "leftarrow": "\u2190",
-    "rightarrow": "\u2192",
-    "uparrow": "\u2191",
-    "downarrow": "\u2193",
-    "space": "Space",
-    "tab": "Tab",
-    "escape": "Esc",
-    "return": "Return",
-    "enter": "Enter",
-    "del": "Delete",
-    "backspace": "Backspace",
-    "slash": "/",
-    "period": ".",
-    "comma": ",",
-    "semicolon": ";",
-    "apostrophe": "'",
-    "plus": "+",
-    "minus": "-",
+    "left": "←", "right": "→", "up": "↑", "down": "↓",
+    "space": "Space", "tab": "Tab", "escape": "Esc", "return": "Return",
+    "enter": "Enter", "delete": "Delete", "backspace": "Backspace",
+    "slash": "/", "comma": ",", "period": ".", "semicolon": ";",
+}
+
+# Curated labels for exec commands that don't speak for themselves.
+EXEC_LABELS = {
+    "open -a ghostty": ("Apps", "Open Ghostty"),
+    "rift-cli execute workspace next": ("Workspaces", "Next workspace"),
+    "rift-cli execute workspace prev": ("Workspaces", "Previous workspace"),
+}
+
+# Curated (category, label) for known native actions. Unknown actions fall
+# back to a title-cased guess in their own "Other" category.
+ACTION_LABELS = {
+    "reload_config": ("Misc", "Reload Rift config"),
+    "debug": ("Misc", "Debug dump"),
+    "toggle_window_floating": ("Window state", "Toggle floating / tiled"),
+    "toggle_stack": ("Window state", "Stack / unstack window"),
+    "center_selection": ("Window state", "Center window"),
+    "unjoin_windows": ("Window state", "Un-join the layout tree"),
+    "toggle_orientation": ("Window state", "Toggle orientation"),
+    "toggle_fullscreen": ("Window state", "Toggle fullscreen"),
+    "toggle_fullscreen_within_gaps": ("Column width", "Full-width column (within gaps)"),
+    "switch_to_last_workspace": ("Workspaces", "Jump to last-focused workspace"),
+}
+
+DIRECTION_ACTION_LABELS = {
+    "move_focus": ("Focus", "Focus window {dir}"),
+    "move_node": ("Move", "Move window {dir}"),
+    "focus_display": ("Displays", "Focus display {dir}"),
+}
+
+WORKSPACE_ACTION_LABELS = {
+    "switch_to_workspace": ("Workspaces", "Switch to workspace {n}"),
+    "move_window_to_workspace": ("Workspaces", "Move window to workspace {n}"),
+}
+
+RESIZE_ACTION_LABELS = {
+    "resize_window_grow": ("Column width", "Grow column ({arg})"),
+    "resize_window_shrink": ("Column width", "Shrink column ({arg})"),
 }
 
 
-def humanize_chord(chord):
-    """'cmd + alt + shift - leftarrow' -> 'Cmd+Option+Shift+\u2190'."""
-    if " - " not in chord:
+def humanize_chord(chord, aliases):
+    tokens = [t.strip() for t in chord.split(" + ") if t.strip()]
+    if not tokens:
         return chord
-    left, raw_key = chord.split(" - ", 1)
-    tokens = [t.strip() for t in left.split(" + ")] if left else []
-    key = raw_key.strip()
-    mods = [MODS.get(t, t.capitalize()) for t in tokens if t]
-    if key == "slash":
-        label = "?" if "shift" in tokens else "/"
-    else:
-        label = KEYS.get(key, key.capitalize() if key else "")
-    return "+".join(mods + [label])
+    *mod_tokens, raw_key = tokens
+    mods = []
+    for tok in mod_tokens:
+        low = tok.lower()
+        if low in aliases:
+            for sub in aliases[low].split(" + "):
+                label = MODS.get(sub.strip().lower(), sub.strip().capitalize())
+                if label not in mods:
+                    mods.append(label)
+        else:
+            label = MODS.get(low, tok.capitalize())
+            if label not in mods:
+                mods.append(label)
+    key = KEYS.get(raw_key.lower(), raw_key if len(raw_key) == 1 else raw_key.capitalize())
+    return "+".join(mods + [key])
 
 
-def parse_bindings(text):
+def strip_quotes(s):
+    s = s.strip()
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
+def humanize_value(value):
+    """Return (category, label) for a `[keys]` value (string action or inline table)."""
+    value = value.rstrip()
+    # Drop a trailing TOML comment, if any (none of our values contain '#').
+    if "#" in value:
+        value = value.split("#", 1)[0].rstrip()
+
+    if value.startswith('"'):
+        action = strip_quotes(value)
+        return ACTION_LABELS.get(action, ("Other", action.replace("_", " ").capitalize()))
+
+    if value.startswith("{"):
+        inner = value[1:value.rfind("}")]
+        fields = dict(INLINE_FIELD_RE.findall(inner))
+
+        for action, (category, template) in DIRECTION_ACTION_LABELS.items():
+            if action in fields:
+                return category, template.format(dir=strip_quotes(fields[action]))
+
+        if "move_window_to_display" in fields:
+            sub = fields["move_window_to_display"]
+            m = re.search(r'selector\s*=\s*"([^"]+)"', sub)
+            direction = m.group(1) if m else "?"
+            return "Displays", f"Move window to display {direction}"
+
+        for action, (category, template) in WORKSPACE_ACTION_LABELS.items():
+            if action in fields:
+                n = int(fields[action]) + 1
+                return category, template.format(n=n)
+
+        for action, (category, template) in RESIZE_ACTION_LABELS.items():
+            if action in fields:
+                return category, template.format(arg=strip_quotes(fields[action]))
+
+        if "exec" in fields:
+            argv_raw = fields["exec"][1:-1]  # strip [ ]
+            parts = [strip_quotes(p) for p in re.findall(r'"(?:[^"\\]|\\.)*"', argv_raw)]
+            cmd = parts[-1] if parts else "exec"
+            key = cmd.strip().lower().replace("~/.config/mac-scrolling-wm/helpers/display-shortcuts", "")
+            if "display-shortcuts" in cmd:
+                return "Cheat sheet", "Show this cheat sheet"
+            return EXEC_LABELS.get(key, ("Apps", cmd))
+
+        # Unknown inline table shape — best-effort label from its first field.
+        first_key = next(iter(fields), "action")
+        return "Other", first_key.replace("_", " ").capitalize()
+
+    return "Other", value
+
+
+def parse_keys(text):
+    aliases = {}
     bindings = []
+    section = None
     for line in text.splitlines():
-        m = BINDING_RE.match(line)
-        if m:
-            bindings.append((m.group(1), m.group(2)))
+        sm = SECTION_RE.match(line)
+        if sm:
+            section = sm.group(1).strip()
             continue
-        lm = LUA_BIND_RE.match(line)
-        if lm:
-            bindings.append((lm.group(1), lm.group(1)))
-    return bindings
+        if section == "modifier_combinations":
+            am = ALIAS_RE.match(line)
+            if am:
+                aliases[am.group(1).lower()] = am.group(2)
+            continue
+        if section == "keys":
+            km = KEY_LINE_RE.match(line)
+            if km:
+                bindings.append((km.group(1), km.group(2)))
+    return aliases, bindings
 
 
-def build_groups(bindings):
+def build_groups(aliases, bindings):
     groups = {}
-    for command, chord in bindings:
-        entry = CURATED.get(command)
-        category, action = entry if entry else ("Other", " ".join(w.capitalize() for w in command.split()))
+    for chord, value in bindings:
+        category, label = humanize_value(value)
         groups.setdefault(category, []).append(
-            {"action": action, "keys": [humanize_chord(chord)]}
+            {"action": label, "keys": [humanize_chord(chord, aliases)]}
         )
     static = [
         ("Gestures", [
-            {"action": "Swipe through windows", "keys": ["3-finger swipe \u2190/\u2192"]},
-            {"action": "Switch workspace rows", "keys": ["3-finger swipe \u2191/\u2193"]},
-            {"action": "Scroll the strip", "keys": ["Cmd+Option+scroll"]},
+            {"action": "Switch columns", "keys": ["3-finger swipe ←/→"]},
+            {"action": "Switch workspaces", "keys": ["3-finger swipe ↑/↓"]},
         ]),
     ]
     for name, items in static:
-        groups[name] = items
+        groups.setdefault(name, []).extend(items)
     return [{"name": name, "items": groups[name]} for name in groups]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--config", help="path to the Paneru init.lua (default: ~/.config/paneru/init.lua)")
+    ap.add_argument("--config", help="path to Rift's config.toml (default: ~/.config/rift/config.toml)")
     ap.add_argument("--output", help="write JSON to this file instead of stdout")
     args = ap.parse_args()
 
@@ -150,18 +210,18 @@ def main():
     if not config:
         config = next((c for c in CONFIG_CANDIDATES if os.path.isfile(c)), None)
     if not config or not os.path.isfile(config):
-        sys.exit("generate-shortcuts-json: cannot find config/paneru/init.lua (use --config)")
+        sys.exit("generate-shortcuts-json: cannot find config/rift/config.toml (use --config)")
 
     with open(config, encoding="utf-8") as fh:
         text = fh.read()
-    bindings = parse_bindings(text)
+    aliases, bindings = parse_keys(text)
     if not bindings:
-        sys.exit("generate-shortcuts-json: no bindings found in {}".format(config))
+        sys.exit("generate-shortcuts-json: no [keys] bindings found in {}".format(config))
 
     sheet = {
-        "app": "Paneru",
+        "app": "Rift",
         "config_path": os.path.abspath(config),
-        "groups": build_groups(bindings),
+        "groups": build_groups(aliases, bindings),
     }
 
     if args.output:

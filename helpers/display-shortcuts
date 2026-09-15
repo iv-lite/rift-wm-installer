@@ -1,17 +1,17 @@
 #!/bin/bash
 # display-shortcuts — regenerate the shortcut cheat-sheet JSON from the live
-# Paneru config and open it in mac-cheatsheet-viewer.
+# Rift config and open it in mac-cheatsheet-viewer.
 #
-# Bound to Cmd+Shift+? by config/paneru/init.lua (paneru.exec this script).
-# paneru.exec swallows stdout/stderr, so every run and failure is also logged
-# to display-shortcuts.log next to this script.
+# Bound to Cmd+Shift+? by config/rift/config.toml (an `exec` keybinding).
+# Output is captured by Rift like any other exec'd process, so every run and
+# failure is also logged to display-shortcuts.log next to this script.
 set -euo pipefail
 
 HELPERS_DIR="${MAC_WM_HELPERS_DIR:-$HOME/.config/mac-scrolling-wm/helpers}"
 APP="$HELPERS_DIR/mac-cheatsheet-viewer.app"
 APP_NAME="mac-cheatsheet-viewer"
 GEN="$HELPERS_DIR/generate-shortcuts-json"
-JSON="$HOME/.config/paneru/cheatsheet.json"
+JSON="$HOME/.config/rift/cheatsheet.json"
 LOG="$HELPERS_DIR/display-shortcuts.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >>"$LOG"; }
