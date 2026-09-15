@@ -16,7 +16,7 @@ usage() {
   echo "  install    Sync the repo into the guest and run ./install"
   echo "  access     Re-run the accessibility grant script in the guest"
   echo "  login      Log out/in the GUI session to apply the separate-Spaces setting"
-  echo "  check      Query Paneru state, separate-Spaces mode, installed formulae, and the Ghostty config in the guest"
+  echo "  check      Query Rift state, separate-Spaces mode, installed formulae, and the Ghostty config in the guest"
   echo "  shot       Capture a screenshot into tests/screenshots/"
   echo "  snapshot   Create 'bare' (fresh macOS) + 'provisioned' (after install) snapshots"
   echo "  restore    Restore a snapshot: './tests/preview restore bare'"
@@ -62,7 +62,7 @@ cmd_access() {
   sync_repo
   guest "bash '${GUEST_DIR}/scripts/grant-permissions'" || true
   warn "If grants failed above, open the VM window and grant manually:"
-  warn "System Settings → Privacy & Security → Accessibility → enable Paneru"
+  warn "System Settings → Privacy & Security → Accessibility → enable Rift, Borders"
 }
 
 cmd_login() {
@@ -78,8 +78,8 @@ cmd_check() {
   echo "── Separate Spaces (must be mode 1) ──"
   guest "\"${GUEST_DIR}/scripts/ensure-separate-spaces\" check" 2>&1 || true
   echo ""
-  echo "── Paneru service + state ──"
-  guest "paneru query state --json" 2>&1 || true
+  echo "── Rift service + state ──"
+  guest "RIFT_CLI_PRETTY=1 rift-cli query workspaces" 2>&1 || true
   echo ""
   echo "── Installed formulae ──"
   guest "brew list | grep -Ei 'paneru|rift|aerospace|aerospacebar|borders|tccutil|ghostty' || echo '(none found)'"
@@ -94,7 +94,7 @@ cmd_check() {
   guest "test -x ~/.config/mac-scrolling-wm/helpers/generate-shortcuts-json && echo '(generator installed)' || echo '(missing)'"
   guest "test -x ~/.config/mac-scrolling-wm/helpers/display-shortcuts && echo '(launcher installed)' || echo '(missing)'"
   guest "ls -d ~/.config/mac-scrolling-wm/helpers/mac-cheatsheet-viewer.app >/dev/null 2>&1 && echo '(viewer app built)' || echo '(viewer app NOT built)'"
-  guest "cd /tmp && ~/.config/mac-scrolling-wm/helpers/generate-shortcuts-json --output /tmp/cheatsheet.json && python3 -m json.tool /tmp/cheatsheet.json >/dev/null && echo '(cheat-sheet JSON valid — derived from live init.lua)' || echo '(cheat-sheet JSON INVALID)'"
+  guest "cd /tmp && ~/.config/mac-scrolling-wm/helpers/generate-shortcuts-json --output /tmp/cheatsheet.json && python3 -m json.tool /tmp/cheatsheet.json >/dev/null && echo '(cheat-sheet JSON valid — derived from live config.toml)' || echo '(cheat-sheet JSON INVALID)'"
   ask_cleanup
 }
 

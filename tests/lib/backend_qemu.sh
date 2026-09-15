@@ -21,7 +21,7 @@
 # vm_ip, vm_start, vm_stop, vm_delete, sync_repo, backend_screenshot,
 # backend_snapshot, backend_restore, backend_clean.
 
-VM="paneru-test"
+VM="rift-test"
 GUEST_DIR="$HOME/installer"
 SSH_PORT_ARG="-p ${TESTS_SSH_PORT:-22222}"
 SCP_PORT_ARG="-P ${TESTS_SSH_PORT:-22222}"

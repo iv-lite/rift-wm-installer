@@ -11,7 +11,7 @@
 # vm_ip, vm_start, vm_stop, vm_delete, sync_repo, backend_screenshot,
 # backend_snapshot, backend_restore, backend_clean.
 
-VM="paneru-test"
+VM="rift-test"
 MOUNT_NAME="installer"
 GUEST_DIR="/Volumes/My Shared Files/${MOUNT_NAME}"
 SSH_PORT_ARG=""

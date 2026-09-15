@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Test workflow for the paneru-wm-installer project. Runs the real ./install
+# Test workflow for the rift-wm-installer project. Runs the real ./install
 # inside a fresh macOS guest VM and lets you verify Rift tiling +
 # the native menu bar with Rift's indicators visually via screenshots.
 #
