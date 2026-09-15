@@ -95,8 +95,8 @@ window in the same lane), **Ctrl**.
 |---|---|
 | `Cmd` + `Ctrl` + `←` | Focus the previous display (window stays put) |
 | `Cmd` + `Ctrl` + `→` | Focus the next display (window stays put) |
-| `Cmd` + `Ctrl` + `Shift` + `←` | Move the focused window to the previous display (follow, maximized) |
-| `Cmd` + `Ctrl` + `Shift` + `→` | Move the focused window to the next display (follow, maximized) |
+| `Cmd` + `Ctrl` + `Shift` + `←` | Move the focused window to the previous display (follow, size/disposition unchanged) |
+| `Cmd` + `Ctrl` + `Shift` + `→` | Move the focused window to the next display (follow, size/disposition unchanged) |
 | `Cmd` + `Ctrl` + `↑` | Warp the mouse to the next display |
 | `Cmd` + `Option` + `↑`/`↓` | Focus a column above/below — crosses displays when no window is there |
 | `Cmd` + `Option` + `Shift` + `↑`/`↓` | Move a window to the display above/below (when no window is there to swap with) |
@@ -113,19 +113,31 @@ design; summary below.
 > `crates/lua/src/lib.rs`, expose `next_display` only — confirmed against
 > the complete `Command`/`Operation`/`MouseMove` vocabulary and CLI argv
 > grammar too: there is no indexed or directional variant anywhere in the
-> protocol), so `lib/displays.lua` orders every online display — including
-> ones with no windows on them — by its macOS arrangement position (`y`
-> then `x`) and steps ±1 through that list, focusing the target display's
-> existing window via `ws:focus`. No window is moved.
+> protocol), so displays are ordered — including ones with no windows on
+> them — by their macOS arrangement position (`y` then `x`) and stepped ±1
+> through to get previous/next.
 >
-> **"Current display" follows the mouse pointer**
-> (`helpers/mouse-display`), not the focused window: a window is only
-> tracked by Paneru's Lua `display_of` via strip membership, which doesn't
-> exist when the display you're on has no windows at all — that would
-> otherwise make focus-switching impossible to trigger *from* an empty
-> display. The mouse pointer always has a position regardless of whether any
-> window is there, so it works the same whether the current or target
-> display is empty.
+> **Focus goes through a compiled helper, for speed.** `Cmd+Ctrl+←/→` is a
+> thin dispatch (`config/paneru/lib/displays.lua`) into
+> `~/.config/mac-scrolling-wm/helpers/focus-display`, a compiled Swift
+> binary — not run as an ephemeral `swift -e` script, since that JIT-compile
+> tax (commonly 150-400ms) was the dominant cost of the shortcut and focus
+> is pressed far more often than move. It enumerates displays and finds the
+> mouse's current one via CoreGraphics (the same source
+> `helpers/mouse-display`/`helpers/display-geometry` use), asks the running
+> paneru daemon over IPC (`paneru query on-screen`) which on-screen window
+> belongs to the target display, and warps the pointer to it — plus a
+> synthetic `.mouseMoved` event, since `CGWarpMouseCursorPosition` alone
+> doesn't post a real mouse-moved event to any `CGEventTap`, including
+> paneru's own `focus_follows_mouse` tap — so that option (on by default in
+> this config) picks it up. No window is moved. If the target display has no
+> on-screen window, it just warps to the display's own center instead (the
+> same idea as Paneru's native `mouse nextdisplay`), no event needed.
+> "Current display" this way is always the mouse pointer's display, not the
+> focused window's: a window is only tracked by Paneru's Lua `display_of`
+> via strip membership, which doesn't exist when the display you're on has
+> no windows at all — that would otherwise make focus-switching impossible
+> to trigger *from* an empty display.
 >
 > **Moving to any display needs a helper on 3+ monitors.** Paneru's engine
 > can only move a window to a single fixed display (`other().next()`, the
@@ -136,36 +148,47 @@ design; summary below.
 > shortcuts keep using `window nextdisplay` there. With three or more they
 > delegate to `~/.config/mac-scrolling-wm/helpers/move-display`: a compiled
 > Swift binary that uses the Accessibility API (`AXUIElement`) directly —
-> not AppleScript/System Events — to reposition the focused window onto the
-> target display's frame (keeping its current size — the move does **not**
-> resize the window in transit), then warps the pointer and synthesizes a
-> click at the window's new center so macOS switches its active display
-> (Paneru's active-display marker rotates along), and re-manages it so it
-> is adopted by the target display's strip. Only once it is adopted does
-> the move maximize the window to full width on that display. It then
-> **verifies the adoption** (`paneru query state`), polling in-process
-> instead of sleeping so the OS's lagging display-change notification can't
-> bounce the window back onto the source monitor. While a move is
-> mid-flight the focused window is floating, and both the move and the
-> focus shortcuts skip re-presses so targets are never computed off a stale
-> "current" display.
+> not AppleScript/System Events — to reposition the exact window Lua asked
+> for (matched by its precise window id via the same private
+> `_AXUIElementGetWindow` call paneru's own source uses, not by app name or
+> "whichever window is currently focused" — the latter could grab the wrong
+> window of a multi-window app if `focus_follows_mouse` shifted focus mid-move)
+> onto the target display's frame, keeping its current size the whole time — the move
+> never resizes or maximizes the window, on either display. It then warps
+> the pointer and synthesizes a click at the window's new center so macOS
+> switches its active display (Paneru's active-display marker rotates
+> along), and unconditionally sends `window fullwidth` — regardless of
+> whether the window was tiled or floating beforehand.
+>
+> **Known limitation:** this teleport is invisible to paneru's own
+> strip/row membership tracking — the window is only physically
+> repositioned, never actually removed from its old row or added to a new
+> one in the daemon's model. Only the 2-display `nextdisplay` case is a
+> real paneru ECS operation and gets automatic viewport correction on the
+> row a window leaves; for a 3+ display move, the workspace the window
+> left does not recenter/reset its viewport. Both the move and the focus
+> shortcuts do skip re-presses so targets are never computed off a stale
+> "current" display, but the source-row viewport gap itself is not
+> currently addressed.
 >
 > **Empty displays are reachable.** Paneru's Lua `display_of` resolves a
 > window's display by *membership* in a strip, so a monitor with no windows
-> used to be invisible and could not be focused or moved onto. The display
-> geometry comes from a helper (`helpers/display-geometry`) that lists
-> every online display via CoreGraphics — empty ones included — and is
+> used to be invisible and could not be focused or moved onto. For move, the
+> display geometry comes from a helper (`helpers/display-geometry`) that
+> lists every online display via CoreGraphics — empty ones included — and is
 > cached in Lua, re-read on display events and whenever a window appears on
-> an unknown display. Move targets an occupied *or* empty display (the
-> helper teleports the window onto the blank monitor's frame and it is
-> adopted by that strip). Focus on an empty display drops the pointer on
-> its center (via `helpers/warp-pointer`), the same idea as Paneru's native
-> `mouse nextdisplay`, so the OS and the next move target it.
+> an unknown display; move targets an occupied *or* empty display (the
+> `move-display` helper teleports the window onto the blank monitor's frame
+> and it is adopted by that strip). For focus, `focus-display` does its own
+> CoreGraphics enumeration internally and warps to the empty display's
+> center directly when `paneru query on-screen` has nothing for it.
 >
 > One-time cost: grant Accessibility access to the compiled
-> `~/.config/mac-scrolling-wm/helpers/move-display` binary (macOS prompts
-> on first teleport). Since it's compiled once by `scripts/install-helpers`
-> (not run as an ephemeral script), that grant sticks across reinstalls.
+> `~/.config/mac-scrolling-wm/helpers/move-display` **and**
+> `~/.config/mac-scrolling-wm/helpers/focus-display` binaries (macOS prompts
+> the first time each one posts a synthetic event). Since both are compiled
+> once by `scripts/install-helpers` (not run as ephemeral scripts), those
+> grants stick across reinstalls.
 
 ### Window state
 
@@ -395,10 +418,11 @@ config/paneru/            Paneru config (sliding strip, bindings, rules) — ini
 config/paneru/lib/        Display-navigation Lua modules, required by init.lua
                           (displays.lua, query.lua, log.lua)
 config/ghostty/           Ghostty config (frameless title bar)
-helpers/                  display navigation: display-geometry, mouse-display,
-                          warp-pointer (CoreGraphics), move-display.swift
-                          (Accessibility, compiled at install time); shortcut
-                          cheat-sheet: generate-shortcuts-json, display-shortcuts
+helpers/                  display navigation: display-geometry, mouse-display
+                          (CoreGraphics, used by move); focus-display.swift,
+                          move-display.swift (Accessibility + IPC, compiled
+                          at install time); shortcut cheat-sheet:
+                          generate-shortcuts-json, display-shortcuts
                           (mac-cheatsheet-viewer app lives in its own repo at
                           iv-lite/mac-cheatsheet-viewer)
 tests/                    VM test workflow (tests/preview + lib/ backends)
