@@ -34,8 +34,9 @@ local BINDINGS = {
   -- Workspace rows are created on demand (south past the last row spawns one)
   -- and reaped when empty; the 3-finger vertical swipe also cycles them.
 
-  -- ─── Displays: navigation is handled by function binds below (they add a
-  -- full-width maximize before the hop). Mouse warp stays here: ↑ = next. ───
+  -- ─── Displays: navigation is handled by function binds below (the move
+  -- resizes to full width only after the window has arrived; the helper
+  -- needs to be on the target display first). Mouse warp stays here: ↑ = next. ───
   ["mouse nextdisplay"] = "cmd + ctrl - uparrow",
 
   -- ─── Window state ───
@@ -153,12 +154,6 @@ paneru.setup {
 -- window is floating — that is what stops rapid re-presses from computing
 -- targets off a stale "current" display and bouncing windows back to the
 -- wrong monitor.
-
-local function filled(ws, wid)
-  local win, disp = ws:window(wid), ws:display_of(wid)
-  if not win or not disp then return true end
-  return win.frame.width >= disp.width - 32
-end
 
 -- Helpers installed alongside move-display (layout, see helpers/):
 --   display-geometry — real CG frames of every online display, empties included
@@ -294,8 +289,8 @@ local function move_to_display(ws, target)
   if not cur or #ids < 2 then return end
   local n = #ids
   if n == 2 then
-    if not filled(ws, focused) then paneru.run("window fullwidth") end
     paneru.run("window nextdisplay")
+    paneru.run("window fullwidth")
     return
   end
   local idx
@@ -309,14 +304,14 @@ local function move_to_display(ws, target)
     paneru.flash("move-display: no geometry for target display", 3.0)
     return
   end
-  paneru.exec(MOVE_HELPER, { string.format("%d %d %d %d %d", t.x, t.y, t.width, t.height, t.id) })
+  paneru.exec(MOVE_HELPER, { string.format("%d %d %d %d", t.x, t.y, t.width, t.height), string.format("%d", t.id) })
 end
 
 -- ─── Keybindings ───
 -- Focus only: window stays put, no maximize.
 paneru.bind("cmd + ctrl - leftarrow", function(ws) return focus_display(ws, "previous") end)
 paneru.bind("cmd + ctrl - rightarrow", function(ws) return focus_display(ws, "next") end)
--- Move window + follow, with maximize-before-move.
+-- Move window + follow; full width is applied at the destination, after arrival.
 paneru.bind("cmd + ctrl + shift - leftarrow", function(ws) move_to_display(ws, "previous") end)
 paneru.bind("cmd + ctrl + shift - rightarrow", function(ws) move_to_display(ws, "next") end)
 

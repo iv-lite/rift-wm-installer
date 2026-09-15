@@ -117,15 +117,17 @@ window in the same lane), **Ctrl**.
 > move shortcuts keep using `window nextdisplay` there. With three or more
 > they delegate to `~/.config/mac-scrolling-wm/helpers/move-display`:
 > the script floats the focused window, teleports it onto the target
-> display's frame via Accessibility, clicks it so macOS switches its
-> active display (Paneru's active-display marker rotates along), and
-> re-manages it so it is adopted by the target display's strip. It then
-> **verifies the adoption** (`paneru query state`), polling the active
-> display instead of sleeping so the OS's lagging display-change
-> notification can't bounce the window back onto the source monitor. While
-> a move is mid-flight the focused window is floating, and both the move and
-> the focus shortcuts skip re-presses so targets are never computed off a
-> stale "current" display.
+> display's frame via Accessibility (keeping its current size — the move
+> does **not** resize the window in transit), clicks it so macOS switches
+> its active display (Paneru's active-display marker rotates along), and
+> re-manages it so it is adopted by the target display's strip. Only once
+> it is adopted does the move maximize the window to full width on that
+> display. It then **verifies the adoption** (`paneru query state`),
+> polling the active display instead of sleeping so the OS's lagging
+> display-change notification can't bounce the window back onto the source
+> monitor. While a move is mid-flight the focused window is floating, and
+> both the move and the focus shortcuts skip re-presses so targets are
+> never computed off a stale "current" display.
 >
 > **Empty displays are reachable.** Paneru's Lua `display_of` resolves a
 > window's display by *membership* in a strip, so a monitor with no windows

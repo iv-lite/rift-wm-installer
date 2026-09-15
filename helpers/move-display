@@ -20,8 +20,10 @@
 #      strip).
 #   4. Re-manage (toggle back to tiled), then VERIFY the focused window was
 #      adopted by the target display's strip (floating=false, display=target).
-#      On failure, re-float and retry up to 3 times, then record an error and
-#      leave the window tiled so state stays clean.
+#      Once adopted, arc window to full width: the window keeps its size on
+#      the way over and is only resized when it has arrived. On failure,
+#      re-float and retry up to 3 times, then record an error and leave the
+#      window tiled so state stays clean.
 #
 # Paneru's Lua `display_of` resolves a window's display by *membership* in a
 # strip, so it lies while a move is mid-flight. The helper therefore never
@@ -145,14 +147,14 @@ if ! "$PANERU" send-cmd window manage >/dev/null 2>&1; then
 fi
 sleep 0.3
 
-# --- Step 3: teleport the frontmost window onto the target frame and click
-# --- its center so macOS switches its active display.
-if ! osascript - "$tx" "$ty" "$tw" "$th" <<'EOF'
+# --- Step 3: teleport the frontmost window onto the target frame's corner and
+# --- click its center so macOS switches its active display. The window keeps
+# --- its current size on the way over; it is resized only once it has been
+# --- adopted by the destination strip (see the fullwidth right after).
+if ! osascript - "$tx" "$ty" <<'EOF'
 on run argv
   set tx to item 1 of argv as number
   set ty to item 2 of argv as number
-  set tw to item 3 of argv as number
-  set th4 to item 4 of argv as number
   tell application "System Events"
     set frontApp to name of first application process whose frontmost is true
     tell process frontApp
@@ -161,7 +163,6 @@ on run argv
       end if
       set fw to front window
       set position of fw to {tx, ty}
-      set size of fw to {tw, th4}
       set {px, py} to position of fw
       set {pw, ph} to size of fw
       click at {px + pw / 2, py + ph / 2}
@@ -204,6 +205,8 @@ for attempt in 1 2 3; do
 done
 
 if [ "$adopted" = 1 ]; then
+  # Window has arrived on the target strip; only now resize it to full width.
+  "$PANERU" send-cmd window fullwidth >/dev/null 2>&1 || true
   log "done: window $FOCUSED_WIN -> display $TARGET_ID"
   exit 0
 fi
