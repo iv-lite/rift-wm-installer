@@ -1,157 +1,52 @@
 #!/bin/bash
-# move-display — physically move the focused window to another display (v2).
+# move-display — teleport the focused window onto another display (v3).
 #
 # Paneru can only move a window to a single fixed display ("other().next()"
 # in its ECS), which cannot reach every monitor on a 3+ display setup. For
-# those setups this helper is the mover. It is invoked by
+# those setups this helper does the physical relocation. It is invoked by
 # config/paneru/init.lua (Cmd+Ctrl+Shift+arrows) and must be installed at
 # $HOME/.config/mac-scrolling-wm/helpers/move-display.
 #
-# The move is a four-step dance, made reliable by STATE-DRIVEN steps and a
-# settle-by-poll loop instead of fixed sleeps:
-#   1. Float the focused window (only if it is not already floating) so Paneru
-#      stops pinning it to its current display's strip.
-#   2. AppleScript/Accessibility — teleport the frontmost window onto the
-#      target display's frame and click its center, so macOS switches its
-#      active display (Paneru's active-display marker rotates along).
-#   3. POLL `paneru query state` until the active display IS the target
-#      (replaces a fixed sleep; the marker rotation is OS-notification driven
-#      and can lag, which is what made v1 bounce windows back onto the source
-#      strip).
-#   4. Re-manage (toggle back to tiled), then VERIFY the focused window was
-#      adopted by the target display's strip (floating=false, display=target).
-#      Once adopted, arc window to full width: the window keeps its size on
-#      the way over and is only resized when it has arrived. On failure,
-#      re-float and retry up to 3 times, then record an error and leave the
-#      window tiled so state stays clean.
+# This helper does exactly one thing: use AppleScript/Accessibility to move
+# the frontmost window's position onto the target display's corner and click
+# it, so macOS (and so Paneru's active-display marker) switches to that
+# display. The window keeps its current size in transit — floating,
+# settling, verifying adoption, retrying, and the eventual resize to full
+# width all now live in Lua (config/paneru/init.lua's settle_after_move),
+# which can poll Paneru's own state in-process (paneru.query_active /
+# query_json) instead of spawning a `paneru query state` + python3 pair for
+# every check, which is what made the previous version of this script slow.
 #
-# Paneru's Lua `display_of` resolves a window's display by *membership* in a
-# strip, so it lies while a move is mid-flight. The helper therefore never
-# trusts display_of before settling, and while the focused window is floating
-# Lua bails out (busy) instead of double-firing.
-#
-# Usage: move-display "<x> <y> <w> <h>" <target_display_id>
-# The frame is the target display's full bounds in CG coordinates; the id is
-# paneru's display id (for the settle-poll verify).
+# Usage: move-display <app_name> <x> <y>
+# <app_name> is the frontmost app to (re-)activate before teleporting, if it
+# isn't already frontmost; <x> <y> is the target display's origin in CG
+# coordinates. Lua already has both from paneru.query_active()/display_frame().
 #
 # Needs Accessibility access for System Events (one-time macOS prompt).
 # paneru.exec swallows stdout/stderr, so every run is also logged.
 set -euo pipefail
 
-FRAME="$1"
-TARGET_ID="$2"
+APP_NAME="$1"
+TX="$2"
+TY="$3"
 DEFAULT_DIR="${MAC_WM_HELPERS_DIR:-$HOME/.config/mac-scrolling-wm/helpers}"
 LOG="$DEFAULT_DIR/move-display.log"
-PANERU="${PANERU_BIN:-/opt/homebrew/bin/paneru}"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >>"$LOG"; }
 mkdir -p "$(dirname "$LOG")"
-log "run target=$FRAME id=$TARGET_ID"
-
-IFS=' ' read -r tx ty tw th <<<"$FRAME"
-
-# One snapshot of `paneru query state`, reduced to the focused window's fields:
-# active_display_id, focused_window_id, focused_app_name, focused_display_id,
-# focused_floating.
-snapshot() {
-  local out
-  out="$("$PANERU" query state 2>/dev/null || true)"
-  SNAP_DATA="$out" python3 <<'PYEOF'
-import json
-import os
-import sys
-try:
-    d = json.loads(os.environ["SNAP_DATA"])
-    a = d["active"]
-    wins = [w for ws in d["virtual_workspaces"] for w in ws["windows"]]
-    fw = next((w for w in wins if w["window_id"] == a["focused_window_id"]), None)
-except Exception:
-    sys.exit(1)
-print("active_display_id={}".format(a["display_id"]))
-print("focused_window_id={}".format(a["focused_window_id"]))
-print("focused_app_name={}".format(a["focused_app_name"]))
-if fw:
-    print("focused_display_id={}".format(fw["display_id"]))
-    print("focused_floating={}".format(fw["floating"]))
-PYEOF
-}
-
-# getval <key> <snapshot-string> — print the value for one key.
-getval() {
-  printf '%s\n' "$2" | awk -v k="$1" -F= '$1 == k { sub(/^[^=]*=/, ""); print }'
-}
-
-active_display_id() {
-  getval active_display_id "$(snapshot 2>/dev/null || true)"
-}
-
-focused_window_id() {
-  getval focused_window_id "$(snapshot 2>/dev/null || true)"
-}
+log "teleport app=$APP_NAME target=$TX,$TY"
 
 frontmost_app() {
   osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || true
 }
 
-# Wait (≤ 12 × 0.2s) for paneru's active display to reach the target.
-wait_active_target() {
-  local i ad
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
-    ad="$(active_display_id)"
-    [ "$ad" = "$TARGET_ID" ] && return 0
-    sleep 0.2
-  done
-  return 1
-}
-
-# True when the focused window is a tiled window adopted by the target strip.
-verify_adopted() {
-  local snap fl disp ad
-  snap="$(snapshot 2>/dev/null || true)"
-  fl="$(getval focused_floating "$snap")"
-  disp="$(getval focused_display_id "$snap")"
-  ad="$(getval active_display_id "$snap")"
-  [ "$fl" = "False" ] && [ "$disp" = "$TARGET_ID" ] && [ "$ad" = "$TARGET_ID" ]
-}
-
-# --- Step 0: read the current focus; refuse mid-flight / no-op calls. ------
-SNAP="$(snapshot 2>/dev/null || true)"
-FOCUSED_APP="$(getval focused_app_name "$SNAP")"
-FOCUSED_WIN="$(getval focused_window_id "$SNAP")"
-FOCUSED_FLOATING="$(getval focused_floating "$SNAP")"
-FOCUSED_DISPLAY="$(getval focused_display_id "$SNAP")"
-
-if [ -z "$FOCUSED_APP" ] || [ -z "$FOCUSED_WIN" ]; then
-  log "error: no focused window"
-  exit 1
-fi
-if [ "$FOCUSED_FLOATING" = "True" ]; then
-  log "busy: focused window is floating (a move is already in flight) — ignoring"
-  exit 0
-fi
-if [ "$FOCUSED_DISPLAY" = "$TARGET_ID" ]; then
-  log "noop: window already on display $TARGET_ID"
-  exit 0
+# Re-activate the intended app first if focus drifted since Lua floated it.
+if [ -n "$APP_NAME" ] && [ "$(frontmost_app)" != "$APP_NAME" ]; then
+  osascript -e "tell application \"$APP_NAME\" to activate" 2>/dev/null || true
+  sleep 0.15
 fi
 
-# --- Step 1: sync the macOS frontmost app to the focused window. -----------
-if [ "$(frontmost_app)" != "$FOCUSED_APP" ]; then
-  osascript -e "tell application \"$FOCUSED_APP\" to activate" 2>/dev/null || true
-  sleep 0.3
-fi
-
-# --- Step 2: float the focused window (state-driven, no toggle drift). -----
-if ! "$PANERU" send-cmd window manage >/dev/null 2>&1; then
-  log "error: 'window manage' (float) failed"
-  exit 1
-fi
-sleep 0.3
-
-# --- Step 3: teleport the frontmost window onto the target frame's corner and
-# --- click its center so macOS switches its active display. The window keeps
-# --- its current size on the way over; it is resized only once it has been
-# --- adopted by the destination strip (see the fullwidth right after).
-if ! osascript - "$tx" "$ty" <<'EOF'
+if ! osascript - "$TX" "$TY" <<'EOF'
 on run argv
   set tx to item 1 of argv as number
   set ty to item 2 of argv as number
@@ -175,45 +70,5 @@ then
   exit 1
 fi
 
-# --- Steps 4–5: settle, re-manage, verify (retry cycle). --------------------
-adopted=0
-for attempt in 1 2 3; do
-  if wait_active_target; then
-    # focus_follows_mouse can re-focus a different window mid-move; steer focus
-    # back to the moved window so the re-manage tiles the right one.
-    if [ "$(focused_window_id)" != "$FOCUSED_WIN" ]; then
-      osascript -e "tell application \"$FOCUSED_APP\" to activate" 2>/dev/null || true
-      sleep 0.3
-    fi
-    "$PANERU" send-cmd window manage >/dev/null 2>&1 || true
-    for _c in 1 2 3; do
-      if verify_adopted; then
-        adopted=1
-        break
-      fi
-      sleep 0.3
-    done
-    [ "$adopted" = 1 ] && break
-  fi
-  # Not adopted (marker lagged / window re-tiled on source): float it again
-  # so the next attempt's manage re-tiles it onto the *active* strip.
-  local_fl="$(getval focused_floating "$(snapshot 2>/dev/null || true)")"
-  if [ "$local_fl" = "False" ]; then
-    "$PANERU" send-cmd window manage >/dev/null 2>&1 || true
-    sleep 0.4
-  fi
-done
-
-if [ "$adopted" = 1 ]; then
-  # Window has arrived on the target strip; only now resize it to full width.
-  "$PANERU" send-cmd window fullwidth >/dev/null 2>&1 || true
-  log "done: window $FOCUSED_WIN -> display $TARGET_ID"
-  exit 0
-fi
-log "error: move of window $FOCUSED_WIN to display $TARGET_ID failed"
-# Leave the window tiled (wherever it landed) so the next command starts clean.
-final_fl="$(getval focused_floating "$(snapshot 2>/dev/null || true)")"
-if [ "$final_fl" = "False" ]; then
-  "$PANERU" send-cmd window manage >/dev/null 2>&1 || true
-fi
-exit 1
+log "done: teleported to $TX,$TY"
+exit 0

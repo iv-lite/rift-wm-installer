@@ -142,18 +142,26 @@ paneru.setup {
 -- (`other().next()` in its ECS), which on 3+ display setups cannot reach
 -- every monitor. With exactly two displays a single `nextdisplay` hop
 -- suffices (previous and next are the same display). With three or more the
--- move goes through an external helper
--- (~/.config/mac-scrolling-wm/helpers/move-display) that floats the focused
--- window, teleports it (AppleScript/Accessibility) onto the target display's
--- frame, brings focus there so Paneru's active-display marker rotates, and
--- re-manages it so it is adopted by the target display's strip.
+-- window is floated, teleported (AppleScript/Accessibility, via the external
+-- ~/.config/mac-scrolling-wm/helpers/move-display) onto the target display's
+-- frame, and brought into focus there so Paneru's active-display marker
+-- rotates.
 --
--- While a move is mid-flight the focused window is *floating*. Paneru's Lua
--- `display_of` resolves a window's display by strip membership, which lags
--- the physical teleport, so both focus and move skip while the focused
--- window is floating — that is what stops rapid re-presses from computing
--- targets off a stale "current" display and bouncing windows back to the
--- wrong monitor.
+-- Either way, resizing to full width must wait until Paneru's active-display
+-- marker has actually rotated to the destination (it only updates on a
+-- `DisplayChanged` event, which neither `nextdisplay` nor the teleport fire
+-- themselves — resizing any earlier can apply against the wrong display, or
+-- race Paneru's own internal post-move resize and visibly double up). Both
+-- paths settle through the same `settle_after_move` below, which polls
+-- Paneru's state in-process (`paneru.query_active`/`query_json`, no
+-- subprocess spawn) instead of sleeping a guessed amount.
+--
+-- While a move is mid-flight (3+ displays only — the 2-display path never
+-- floats) the focused window is *floating*. Paneru's Lua `display_of`
+-- resolves a window's display by strip membership, which lags the physical
+-- teleport, so both focus and move skip while the focused window is
+-- floating — that is what stops rapid re-presses from computing targets off
+-- a stale "current" display and bouncing windows back to the wrong monitor.
 
 -- Helpers installed alongside move-display (layout, see helpers/):
 --   display-geometry — real CG frames of every online display, empties included
@@ -279,6 +287,79 @@ local function display_frame(ws, display_id)
   end
 end
 
+-- ─── Settle-after-move ─────────────────────────────────────────────────────
+-- Shared by both display-move paths below: wait for Paneru's active-display
+-- marker to actually reach the target (in-process query, no subprocess), then
+-- re-manage/verify adoption, and resize only once landed. This is the one and
+-- only place either path resizes.
+local SETTLE_POLL_TICKS = 60   -- in-process query round-trips; cheap, so generous
+local SETTLE_ATTEMPTS = 3
+
+local function wait_active_display(target_id)
+  for _ = 1, SETTLE_POLL_TICKS do
+    local ok, active = pcall(paneru.query_active)
+    if ok and active and active.display_id == target_id then return true end
+  end
+  return false
+end
+
+-- A handful of query round-trips as a cheap in-process "let a tick or two of
+-- Paneru's dispatch loop pass" — used after a mutating `paneru.run` so the
+-- verify check below doesn't read state from before the command applied.
+local function settle_ticks(n)
+  for _ = 1, n do pcall(paneru.query_active) end
+end
+
+-- The moved window's own {window_id, floating, display_id} from a fresh
+-- state query, or nil if it can't be found (e.g. between strips).
+local function window_state(window_id)
+  local ok, state = pcall(paneru.query_json, "state")
+  if not ok or not state then return nil end
+  for _, row in ipairs(state.virtual_workspaces or {}) do
+    for _, w in ipairs(row.windows or {}) do
+      if w.window_id == window_id then return w end
+    end
+  end
+end
+
+local function adopted(target_id, moved_window_id)
+  local ok, active = pcall(paneru.query_active)
+  if not ok or not active or active.display_id ~= target_id then return false end
+  local w = window_state(moved_window_id)
+  return w ~= nil and w.floating == false and w.display_id == target_id
+end
+
+local function settle_after_move(ws, target_id, moved_window_id)
+  for _attempt = 1, SETTLE_ATTEMPTS do
+    if wait_active_display(target_id) then
+      -- focus_follows_mouse can steal focus mid-hop; steer it back so the
+      -- re-manage below (if any) tiles the window that actually moved.
+      local ok, active = pcall(paneru.query_active)
+      if ok and active and active.focused_window_id ~= moved_window_id then
+        ws:focus(moved_window_id)
+      end
+      local w = window_state(moved_window_id)
+      if w and w.floating then
+        paneru.run("window manage")  -- re-tile onto the now-active strip
+        settle_ticks(5)
+      end
+      if adopted(target_id, moved_window_id) then
+        paneru.run("window fullwidth")
+        return true
+      end
+    end
+    -- Not adopted: float it again so the next attempt's manage re-tiles it
+    -- onto the active strip (mirrors the previous bash helper's retry).
+    local w = window_state(moved_window_id)
+    if w and w.floating == false then
+      paneru.run("window manage")
+      settle_ticks(5)
+    end
+  end
+  paneru.flash("move-display: failed to adopt target display", 3.0)
+  return false
+end
+
 local function move_to_display(ws, target)
   local focused = ws:focused()
   if not focused then return end
@@ -289,8 +370,10 @@ local function move_to_display(ws, target)
   if not cur or #ids < 2 then return end
   local n = #ids
   if n == 2 then
+    local other_id
+    for _, id in ipairs(ids) do if id ~= cur.id then other_id = id end end
     paneru.run("window nextdisplay")
-    paneru.run("window fullwidth")
+    settle_after_move(ws, other_id, focused)
     return
   end
   local idx
@@ -304,7 +387,18 @@ local function move_to_display(ws, target)
     paneru.flash("move-display: no geometry for target display", 3.0)
     return
   end
-  paneru.exec(MOVE_HELPER, { string.format("%d %d %d %d", t.x, t.y, t.width, t.height), string.format("%d", t.id) })
+  local ok, active = pcall(paneru.query_active)
+  local app_name = ok and active and active.focused_app_name or ""
+  paneru.run("window manage")  -- float, so it can be teleported off its strip
+  settle_ticks(5)
+  local exec_ok, res = pcall(paneru.exec, MOVE_HELPER, { app_name, string.format("%d", t.x), string.format("%d", t.y) })
+  if not exec_ok or not res or res.code ~= 0 then
+    paneru.flash("move-display: teleport failed", 3.0)
+    local w = window_state(focused)
+    if w and w.floating then paneru.run("window manage") end  -- leave it tiled somewhere clean
+    return
+  end
+  settle_after_move(ws, t.id, focused)
 end
 
 -- ─── Keybindings ───
