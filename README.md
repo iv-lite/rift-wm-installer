@@ -127,9 +127,20 @@ window in the same lane), **Ctrl**.
 > the focus shortcuts skip re-presses so targets are never computed off a
 > stale "current" display.
 >
+> **Empty displays are reachable.** Paneru's Lua `display_of` resolves a
+> window's display by *membership* in a strip, so a monitor with no windows
+> used to be invisible and could not be focused or moved onto. The display
+> geometry now comes from a helper (`helpers/display-geometry`) that lists
+> every online display via CoreGraphics — empty ones included — and is cached
+> in Lua, re-read on display events and whenever a window appears on an
+> unknown display. Move targets an occupied *or* empty display (the helper
+> teleports the window onto the blank monitor's frame and it is adopted by
+> that strip). Focus on an empty display drops the pointer on its center
+> (via `helpers/warp-pointer`), the same idea as Paneru's native
+> `mouse nextdisplay`, so the OS and the next move target it.
+>
 > One-time cost: grant Accessibility access to System Events (macOS
-> prompts on first teleport). If the target display has no windows at all,
-> the move is a no-op with a flash message.
+> prompts on first teleport).
 
 ### Window state
 

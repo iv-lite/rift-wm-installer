@@ -160,8 +160,69 @@ local function filled(ws, wid)
   return win.frame.width >= disp.width - 32
 end
 
--- Geometric display ordering (used by focus-only and move targeting).
+-- Helpers installed alongside move-display (layout, see helpers/):
+--   display-geometry — real CG frames of every online display, empties included
+--   warp-pointer    — drop the cursor on an absolute point (focus an empty display)
+local MOVE_HELPER = os.getenv("HOME") .. "/.config/mac-scrolling-wm/helpers/move-display"
+local GEOM_HELPER = os.getenv("HOME") .. "/.config/mac-scrolling-wm/helpers/display-geometry"
+local WARP_HELPER = os.getenv("HOME") .. "/.config/mac-scrolling-wm/helpers/warp-pointer"
+
+-- ─── Display geometry cache ───────────────────────────────────────────────
+-- Paneru's Lua `display_of` resolves a display by *membership*, so a monitor
+-- with no windows is invisible to it and navigation cannot reach it. The real
+-- display list (all online displays, cached here and refreshed on display
+-- events / on a detected geometry mismatch) is what ordering and targeting use.
+local DISPLAYS = {}      -- display_id -> { id, x, y, width, height }
+local ORDERED_IDS = {}   -- display ids in geometric order (y, then x, ascending)
+local GEOM_STALE = true
+
+local function sort_ordered_ids()
+  table.sort(ORDERED_IDS, function(a, b)
+    if DISPLAYS[a].y ~= DISPLAYS[b].y then return DISPLAYS[a].y < DISPLAYS[b].y end
+    return DISPLAYS[a].x < DISPLAYS[b].x
+  end)
+end
+
+local function refresh_geometry()
+  local ok, res = pcall(paneru.exec, GEOM_HELPER, {})
+  if not ok or not res or res.code ~= 0 then return false end
+  local t, ids = {}, {}
+  for line in (res.stdout or ""):gmatch("[^\r\n]+") do
+    local id, x, y, w, h = line:match("(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
+    if id then
+      id, x, y, w, h = tonumber(id), tonumber(x), tonumber(y), tonumber(w), tonumber(h)
+      t[id] = { id = id, x = x, y = y, width = w, height = h }
+      ids[#ids + 1] = id
+    end
+  end
+  if #ids == 0 then return false end
+  DISPLAYS, ORDERED_IDS, GEOM_STALE = t, ids, false
+  sort_ordered_ids()
+  return true
+end
+
+-- Re-read geometry when the cached set went stale, or when any window sits on
+-- a display we know nothing about (a display appeared outside an event).
+local function ensure_geometry(ws)
+  if GEOM_STALE then
+    if refresh_geometry() then return end
+  else
+    for _, w in ipairs(ws:windows()) do
+      local d = ws:display_of(w.id)
+      if d and not DISPLAYS[d.id] then
+        GEOM_STALE = true
+        refresh_geometry()
+        return
+      end
+    end
+  end
+end
+
+-- Geometric display ordering (all physical displays, empty ones included).
 local function ordered_displays(ws)
+  ensure_geometry(ws)
+  if #ORDERED_IDS >= 2 then return ORDERED_IDS end
+  -- geometry helper unavailable: fall back to window-derived ordering
   local displays = {}
   for _, w in ipairs(ws:windows()) do
     local d = ws:display_of(w.id)
@@ -205,13 +266,18 @@ local function focus_display(ws, target)
   local target_id = ids[((idx - 1 + step) % n) + 1]
   local win = focused_on_display(ws, target_id)
   if win then return ws:focus(win) end
+  -- Target display has no windows: drop the pointer on its center so the OS
+  -- treats it as the active display (the same idea as `mouse nextdisplay`).
+  local t = DISPLAYS[target_id]
+  if t then
+    paneru.exec(WARP_HELPER, { string.format("%d %d", math.floor(t.x + t.width / 2), math.floor(t.y + t.height / 2)) })
+  end
 end
 
--- Helper that physically moves the window to another display (float, AX
--- teleport, focus to rotate the active marker, re-manage).
-local MOVE_HELPER = os.getenv("HOME") .. "/.config/mac-scrolling-wm/helpers/move-display"
-
 local function display_frame(ws, display_id)
+  ensure_geometry(ws)
+  local t = DISPLAYS[display_id]
+  if t then return t end
   for _, w in ipairs(ws:windows()) do
     local d = ws:display_of(w.id)
     if d and d.id == display_id then return d end
@@ -240,7 +306,7 @@ local function move_to_display(ws, target)
   if target_id == cur.id then return end
   local t = display_frame(ws, target_id)
   if not t then
-    paneru.flash("move-display: target display has no windows", 3.0)
+    paneru.flash("move-display: no geometry for target display", 3.0)
     return
   end
   paneru.exec(MOVE_HELPER, { string.format("%d %d %d %d %d", t.x, t.y, t.width, t.height, t.id) })
@@ -253,6 +319,12 @@ paneru.bind("cmd + ctrl - rightarrow", function(ws) return focus_display(ws, "ne
 -- Move window + follow, with maximize-before-move.
 paneru.bind("cmd + ctrl + shift - leftarrow", function(ws) move_to_display(ws, "previous") end)
 paneru.bind("cmd + ctrl + shift - rightarrow", function(ws) move_to_display(ws, "next") end)
+
+-- Any display event invalidates the geometry cache (re-read on next use).
+for _, evt in ipairs({ "display_added", "display_removed", "display_moved",
+                        "display_resized", "display_configured", "display_changed" }) do
+  paneru.on(evt, function() GEOM_STALE = true end)
+end
 
 -- Cmd+Shift+? (slash key) opens the shortcut cheat sheet: regenerate the JSON
 -- from BINDINGS above, then show it in mac-cheatsheet-viewer.
