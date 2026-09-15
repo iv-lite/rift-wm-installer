@@ -26,10 +26,9 @@ local BINDINGS = {
   ["window fullwidth"] = "cmd + alt - m",
 
   -- ─── Workspaces (Ctrl+Option+↑/↓ = cycle dynamic rows; Shift = move & follow) ───
-  ["window virtual north"] = "ctrl + alt - uparrow",
-  ["window virtual south"] = "ctrl + alt - downarrow",
-  ["window virtualmove north"] = "ctrl + alt + shift - uparrow",
-  ["window virtualmove south"] = "ctrl + alt + shift - downarrow",
+  -- Navigation is handled by function binds below, which snap the destination
+  -- workspace's focused window into view after switching (a plain command
+  -- string here would leave the strip scrolled wherever it happened to be).
   ["window focus managed"] = "cmd + alt - tab",
   -- Workspace rows are created on demand (south past the last row spawns one)
   -- and reaped when empty; the 3-finger vertical swipe also cycles them.
@@ -408,6 +407,14 @@ paneru.bind("cmd + ctrl - rightarrow", function(ws) return focus_display(ws, "ne
 -- Move window + follow; full width is applied at the destination, after arrival.
 paneru.bind("cmd + ctrl + shift - leftarrow", function(ws) move_to_display(ws, "previous") end)
 paneru.bind("cmd + ctrl + shift - rightarrow", function(ws) move_to_display(ws, "next") end)
+
+-- Workspace rows: switch/move, then snap the newly-focused window into the
+-- viewport — otherwise the strip can stay scrolled wherever it was on the
+-- row you left, leaving the destination row's windows off-screen.
+paneru.bind("ctrl + alt - uparrow", function() paneru.run("window virtual north"); paneru.run("window snap") end)
+paneru.bind("ctrl + alt - downarrow", function() paneru.run("window virtual south"); paneru.run("window snap") end)
+paneru.bind("ctrl + alt + shift - uparrow", function() paneru.run("window virtualmove north"); paneru.run("window snap") end)
+paneru.bind("ctrl + alt + shift - downarrow", function() paneru.run("window virtualmove south"); paneru.run("window snap") end)
 
 -- Any display event invalidates the geometry cache (re-read on next use).
 for _, evt in ipairs({ "display_added", "display_removed", "display_moved",
