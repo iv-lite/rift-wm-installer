@@ -20,16 +20,16 @@ echo "  ║          niri-like macOS setup — uninstall        ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo ""
 echo "  This will:"
-echo "   • Stop/remove Paneru (plus legacy Rift, JankyBorders,"
-echo "     rift-swipe, AeroSpace/AeroSpaceBar/Aegis if present)"
+echo "   • Stop/remove Rift + JankyBorders (plus legacy Paneru, rift-swipe,"
+echo "     AeroSpace/AeroSpaceBar/Aegis if present)"
 echo "   • Revoke Accessibility permissions"
 echo "   • Move configs to ~/.config/backups (not deleted, incl. shortcut helpers)"
 echo "   • Uninstall brew packages (you'll choose which to keep)"
-echo "     paneru, tccutil-rs, ghostty"
-echo "     (+ legacy rift, borders, aerospace, aerospacebar if still present)"
+echo "     rift, borders, tccutil-rs, ghostty"
+echo "     (+ legacy paneru, aerospace, aerospacebar if still present)"
 echo "   • Clean up legacy Aegis.app + its LaunchAgent/preferences (if present)"
-echo "   • Untap repos no longer needed (acsandmann/tap, nikitabobko/tap,"
-echo "     rdrkr/tap, FelixKratz/formulae, uinaf/tap)"
+echo "   • Untap repos no longer needed (acsandmann/tap, FelixKratz/formulae,"
+echo "     nikitabobko/tap, rdrkr/tap, uinaf/tap)"
 echo "   • Revert system defaults (show the native menu bar again)"
 echo ""
 read -r -p "  Continue? [y/N] " answer
@@ -45,50 +45,50 @@ fi
 echo ""
 note "Stopping services..."
 
-if command -v paneru >/dev/null 2>&1; then
-	if paneru stop >/dev/null 2>&1; then
-		ok "Paneru stopped"
-	fi
-	if paneru uninstall >/dev/null 2>&1; then
-		ok "Paneru service removed"
-	fi
-	if command -v paneru >/dev/null 2>&1; then
-		paneru uninstall-app >/dev/null 2>&1 || true
-		ok "Paneru app launcher removed (if present)"
-	fi
-fi
-# Belt-and-braces in case the CLI wasn't available to clean up after itself
-if [ -f ~/Library/LaunchAgents/com.github.karinushka.paneru.plist ]; then
-	launchctl bootout "gui/$(id -u)/com.github.karinushka.paneru" >/dev/null 2>&1 || true
-	rm -f ~/Library/LaunchAgents/com.github.karinushka.paneru.plist
-	ok "Paneru LaunchAgent stopped + removed (fallback)"
-fi
-if [ -d "$HOME/Applications/Paneru.app" ]; then
-	rm -rf "$HOME/Applications/Paneru.app"
-	ok "Removed ~/Applications/Paneru.app (fallback)"
-fi
-
-# Legacy: Rift
 if command -v rift >/dev/null 2>&1; then
 	if rift service stop >/dev/null 2>&1; then
-		ok "Legacy Rift stopped"
+		ok "Rift stopped"
 	fi
 	if rift service uninstall >/dev/null 2>&1; then
-		ok "Legacy Rift service removed"
+		ok "Rift service removed"
 	fi
 fi
 
-# Legacy: rift-swipe LaunchAgent (binary lives in ~/.config/rift, removed below)
+# JankyBorders
+if command -v borders >/dev/null 2>&1; then
+	brew services stop borders >/dev/null 2>&1 || true
+	ok "JankyBorders service stopped"
+fi
+
+# Legacy: rift-swipe LaunchAgent (binary lived in ~/.config/rift, removed below)
 if [ -f ~/Library/LaunchAgents/io.rift-swipe.plist ]; then
 	launchctl bootout "gui/$(id -u)/io.rift-swipe" >/dev/null 2>&1 || true
 	rm -f ~/Library/LaunchAgents/io.rift-swipe.plist
 	ok "rift-swipe LaunchAgent stopped + removed (legacy)"
 fi
 
-# Legacy: JankyBorders
-if command -v borders >/dev/null 2>&1; then
-	brew services stop borders >/dev/null 2>&1 || true
-	ok "JankyBorders service stopped (legacy)"
+# Legacy: Paneru
+if command -v paneru >/dev/null 2>&1; then
+	if paneru stop >/dev/null 2>&1; then
+		ok "Legacy Paneru stopped"
+	fi
+	if paneru uninstall >/dev/null 2>&1; then
+		ok "Legacy Paneru service removed"
+	fi
+	if command -v paneru >/dev/null 2>&1; then
+		paneru uninstall-app >/dev/null 2>&1 || true
+		ok "Legacy Paneru app launcher removed (if present)"
+	fi
+fi
+# Belt-and-braces in case the CLI wasn't available to clean up after itself
+if [ -f ~/Library/LaunchAgents/com.github.karinushka.paneru.plist ]; then
+	launchctl bootout "gui/$(id -u)/com.github.karinushka.paneru" >/dev/null 2>&1 || true
+	rm -f ~/Library/LaunchAgents/com.github.karinushka.paneru.plist
+	ok "Legacy Paneru LaunchAgent stopped + removed (fallback)"
+fi
+if [ -d "$HOME/Applications/Paneru.app" ]; then
+	rm -rf "$HOME/Applications/Paneru.app"
+	ok "Removed legacy ~/Applications/Paneru.app (fallback)"
 fi
 
 if [ -d /Applications/AeroSpace.app ] && pgrep -q -f "AeroSpace.app" 2>/dev/null; then
@@ -120,8 +120,8 @@ fi
 echo ""
 note "Revoking Accessibility permissions..."
 if command -v tccutil-rs >/dev/null 2>&1; then
-	for bin in "$(command -v paneru 2>/dev/null || true)" \
-	           "$(command -v rift 2>/dev/null || true)" \
+	for bin in "$(command -v rift 2>/dev/null || true)" \
+	           "$(command -v paneru 2>/dev/null || true)" \
 	           "/Applications/AeroSpace.app/Contents/MacOS/AeroSpace" \
 	           "$(command -v borders 2>/dev/null || true)" \
 	           "$HOME/.config/rift/bin/rift-swipe" \
@@ -203,9 +203,9 @@ if command -v brew >/dev/null 2>&1; then
 		fi
 	}
 
-	add_pkg paneru      formula
-	add_pkg rift        formula acsandmann/tap   # legacy
-	add_pkg borders     formula FelixKratz/formulae   # legacy
+	add_pkg rift        formula acsandmann/tap
+	add_pkg borders     formula FelixKratz/formulae
+	add_pkg paneru       formula              # legacy
 	add_pkg aerospace    cask    nikitabobko/tap      # legacy
 	add_pkg aerospacebar cask    rdrkr/tap            # legacy
 	add_pkg tccutil-rs   formula uinaf/tap

@@ -34,8 +34,8 @@ for arg in "$@"; do
 		--help|-h)
 			echo "Usage: ./install"
 			echo ""
-			echo "  Installs Paneru + Ghostty with an niri-like sliding-strip"
-			echo "  layout (no flags currently)."
+			echo "  Installs Rift + JankyBorders + Ghostty with an niri-like"
+			echo "  scrolling-strip layout (no flags currently)."
 			exit 0
 			;;
 		-*)
@@ -46,7 +46,7 @@ for arg in "$@"; do
 done
 
 # Fresh install vs. upgrade of an existing setup
-if command -v paneru >/dev/null 2>&1; then
+if command -v rift >/dev/null 2>&1; then
 	MODE="upgrade"
 else
 	MODE="install"
@@ -54,7 +54,7 @@ fi
 
 echo ""
 echo "  ╔══════════════════════════════════════════════════════╗"
-echo "  ║   Paneru + Ghostty installer                        ║"
+echo "  ║   Rift + JankyBorders + Ghostty installer            ║"
 if [ "$MODE" = "upgrade" ]; then
 	echo "  ║              niri-like macOS setup (upgrade)       ║"
 else
@@ -65,7 +65,8 @@ echo "  ╚═══════════════════════
 run_step install-deps
 run_step configure-system
 run_step install-ghostty
-run_step install-paneru
+run_step install-rift
+run_step install-borders
 run_step install-helpers
 run_step grant-permissions
 run_step enable-services
@@ -73,8 +74,8 @@ run_step enable-services
 echo ""
 echo "  ${GREEN}══════════════════════════════════════════════${RESET}"
 if [ "$MODE" = "upgrade" ]; then
-	echo "  ${GREEN}  Upgrade complete — configs refreshed & service restarted${RESET}"
-	echo "  ${GREEN}  (Paneru, Ghostty)${RESET}"
+	echo "  ${GREEN}  Upgrade complete — configs refreshed & services restarted${RESET}"
+	echo "  ${GREEN}  (Rift, JankyBorders, Ghostty)${RESET}"
 else
 	echo "  ${GREEN}  Installation complete!${RESET}"
 fi
@@ -85,7 +86,7 @@ if [ "$MODE" = "upgrade" ]; then
 	echo "     (A logout is only required if you toggled 'Displays have separate Spaces'.)"
 else
 	echo "  ${YELLOW}⚠ A logout/login is required for this to take effect:${RESET}"
-	echo "     - 'Displays have separate Spaces' enabled (Paneru-recommended)"
+	echo "     - 'Displays have separate Spaces' enabled (Rift-recommended)"
 fi
 echo ""
 if [ "$MODE" = "upgrade" ]; then
@@ -93,24 +94,25 @@ if [ "$MODE" = "upgrade" ]; then
 else
 	echo "  ${YELLOW}⚠ After the next login:${RESET}"
 fi
-echo "     - Paneru tiles windows on niri-style horizontal strips"
-echo "     - Paneru pops up the active workspace on switch"
+echo "     - Rift tiles windows on a niri-style scrolling strip"
+echo "     - Rift's native menu bar shows workspaces 1-9"
+echo "     - JankyBorders draws a border around the focused window"
 echo "     - Ghostty runs frameless (title bar hidden)"
 echo "     - If accessibility grants failed above, grant them manually:"
 echo "       System Settings → Privacy & Security → Accessibility"
 echo ""
 echo "  ${CYAN}Usage:${RESET}"
 echo "     Cmd+Option+Arrows        move focus between windows"
-echo "     3-finger swipe (←/→)     page through windows (full-width)"
-echo "     3-finger swipe (↑/↓)     switch virtual workspaces"
+echo "     3-finger swipe (←/→)     switch columns"
+echo "     3-finger swipe (↑/↓)     switch workspaces"
 echo "     Cmd+Option+Shift+Arrows  move windows"
-echo "     Ctrl+Option+↑/↓          switch virtual workspace (dynamic rows)"
+echo "     Ctrl+Option+↑/↓          switch workspace (1-9, fixed)"
 echo "     Ctrl+Option+Shift+↑/↓    move window to workspace"
-echo "     Cmd+Option+W             cycle column width (0.3 / 0.5 / 1)"
+echo "     Cmd+Option+W             grow/shrink the focused column"
 echo "     Cmd+Option+V             toggle floating"
 echo "     Cmd+Option+O             stack / unstack"
-echo "     Cmd+Option+Ctrl+Arrows   move between displays"
-echo "     Cmd+Option+Shift+R       restart Paneru (config live-reloads anyway)"
+echo "     Cmd+Ctrl+Arrows          move focus/window between displays"
+echo "     Cmd+Option+Shift+R       reload Rift config (hot reload also on)"
 echo "     Cmd+Shift+?              show the shortcut cheat sheet"
 echo ""
 if [ "$MODE" = "upgrade" ]; then

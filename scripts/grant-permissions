@@ -42,7 +42,7 @@ grant() {
 
 note "Granting Accessibility permissions..."
 
-grant "$(command -v paneru 2>/dev/null || true)"
+grant "$(command -v rift 2>/dev/null || true)"
 
 # ─────────────────────────────────────────────────────────────
 # Post-grant verification: check the TCC database via tccutil-rs
@@ -68,7 +68,7 @@ verify_grant() {
 }
 
 if command -v tccutil-rs >/dev/null 2>&1; then
-	verify_grant "$(command -v paneru 2>/dev/null || true)"
+	verify_grant "$(command -v rift 2>/dev/null || true)"
 else
 	warn "tccutil-rs not found — skipping verification"
 fi

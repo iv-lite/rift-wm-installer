@@ -11,23 +11,43 @@ ok()   { echo "  ${GREEN}✓ $*${RESET}"; }
 warn() { echo "  ${YELLOW}⚠ $*${RESET}"; }
 
 # ─────────────────────────────────────────────────────────────
-# Paneru (per-user launchd service)
+# Rift (per-user launchd service)
 # ─────────────────────────────────────────────────────────────
-if command -v paneru >/dev/null 2>&1; then
-	if pgrep -qx paneru >/dev/null 2>&1; then
-		note "Restarting Paneru (applies upgraded binary + config)..."
-		if paneru restart >/dev/null 2>&1; then
-			ok "Paneru restarted"
+if command -v rift >/dev/null 2>&1; then
+	if pgrep -qx rift >/dev/null 2>&1; then
+		note "Restarting Rift (refreshes launchd plist + applies upgraded binary)..."
+		# `service start` regenerates a stale plist in place (Rift compares it
+		# to what the current binary would generate, rewrites atomically, and
+		# re-bootstraps if it changed) — then `service restart` (kickstart -k)
+		# relaunches the (new) binary.
+		rift service start >/dev/null 2>&1 || true
+		if rift service restart; then
+			ok "Rift restarted"
 		else
-			warn "Paneru restart failed — verify Accessibility permission, then run: paneru restart"
+			warn "Rift restart failed — verify Accessibility permission, then run: rift service restart"
 		fi
 	else
-		note "Starting Paneru..."
-		if paneru start >/dev/null 2>&1; then
-			ok "Paneru service started"
+		note "Starting Rift..."
+		if rift service start; then
+			ok "Rift service started"
 		else
-			warn "Paneru failed to start — verify Accessibility permission was granted, then run: paneru start"
+			warn "Rift failed to start — verify Accessibility permission was granted, then run: rift service start"
 		fi
+	fi
+fi
+
+# ─────────────────────────────────────────────────────────────
+# JankyBorders (brew services)
+# ─────────────────────────────────────────────────────────────
+if command -v borders >/dev/null 2>&1; then
+	if pgrep -qx borders >/dev/null 2>&1; then
+		note "Restarting JankyBorders (applies upgraded binary + bordersrc)..."
+		brew services restart borders >/dev/null 2>&1 || true
+		ok "JankyBorders restarted"
+	else
+		note "Starting JankyBorders..."
+		brew services start borders >/dev/null 2>&1 || true
+		ok "JankyBorders service started"
 	fi
 fi
 
