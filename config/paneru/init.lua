@@ -35,8 +35,8 @@ local BINDINGS = {
   -- and reaped when empty; the 3-finger vertical swipe also cycles them.
 
   -- ─── Displays: navigation is handled by function binds below (the move
-  -- resizes to full width only after the window has arrived; the helper
-  -- needs to be on the target display first). Mouse warp stays here: ↑ = next. ───
+  -- keeps the window's exact size/disposition — no resize, no float/tile
+  -- change). Mouse warp stays here: ↑ = next. ───
   ["mouse nextdisplay"] = "cmd + ctrl - uparrow",
 
   -- ─── Window state ───
@@ -58,14 +58,14 @@ paneru.setup {
   -- ─── Global options ───
   options = {
     focus_follows_mouse = true,
-    mouse_follows_focus = true,
+    -- mouse_follows_focus = true,
     -- Horizontally stacked (side-by-side) monitors: arrange displays
     -- vertically in macOS, set this to -1 so edge crossings feel left/right.
     horizontal_mouse_warp = -1,
     horizontal_mouse_warp_offset = 0,
     preset_column_widths = { 0.3, 0.5, 1.0 },
     animation_speed = 12.0,
-    auto_center = false,
+    auto_center = true,
     create_virtual_workspace_automatically = true,
     reap_empty_workspaces = true,
     window_resize_cycle = true,
@@ -76,7 +76,7 @@ paneru.setup {
 
   -- ─── Swipe & gestures ───
   swipe = {
-    continuous = false,  -- page-flip: a swipe lands exactly on the next window
+    continuous = true,  -- page-flip: a swipe lands exactly on the next window
     sensitivity = 0.35,
     deceleration = 4.0,
     gesture = {
@@ -105,8 +105,8 @@ paneru.setup {
     active = {
       border = {
         enabled = true,
-        color = "#2b303cd6",
-        opacity = 1.0,
+        color = "#2b303c",
+        opacity = 0.84,
         width = 4.0,
         radius = "auto",
       },
@@ -151,10 +151,10 @@ package.path = CONFIG_DIR .. "?.lua;" .. CONFIG_DIR .. "?/init.lua;" .. package.
 local displays = require("lib.displays")
 
 -- ─── Keybindings ───
--- Focus only: window stays put, no maximize.
+-- Focus only: window stays put, nothing resized.
 paneru.bind("cmd + ctrl - leftarrow", function(ws) return displays.focus(ws, "previous") end)
 paneru.bind("cmd + ctrl - rightarrow", function(ws) return displays.focus(ws, "next") end)
--- Move window + follow; full width is applied at the destination, after arrival.
+-- Move window + follow; size and tiled/floating disposition are preserved exactly.
 paneru.bind("cmd + ctrl + shift - leftarrow", function(ws) displays.move(ws, "previous") end)
 paneru.bind("cmd + ctrl + shift - rightarrow", function(ws) displays.move(ws, "next") end)
 
